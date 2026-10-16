@@ -23,9 +23,11 @@ ForgeEngine é uma "Game Engine" criado com IA e por Hobby. esse é um pequeno p
 ForgeEngine é Ingles. não tem portugues
 
 # Linguagem de programação
-a estrutura da engi foi criado em C++
+a estrutura da engine foi criado em C++
 mas você pode usar C# para programar um jogo na Forge Engine
 
 # Graficos na Engine
 Forge Engine usa HLSL para construir Shader
 
+# WARNING
+THIS PROJECT ISN'T A GAME ENGINE COMPLETE THIS IS JUST A LITTLE PROJECT SIMPLE
