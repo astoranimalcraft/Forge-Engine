@@ -150,33 +150,59 @@ adding a field is backward compatible as long as the reader keeps its bounds che
 `OBJ` field order must stay in sync between `ScriptRuntime.cpp` (writer) and
 `Program.cs` (reader).
 
-### Physics: adding a real solver
+### Physics: the Bullet solver
 
-There is no native physics. `Collider` exposes `effectiveRadius` (half the largest
-scaled collider axis), and `SphereCollider`/`BoxCollider`/`CapsuleCollider` currently
-differ only in how they set the size vector.
+`PhysicsRuntime.cs` owns a BulletSharp `DiscreteDynamicsWorld` with an implicit ground
+plane at `y = 0`, so bodies come to rest even when a scene declares no floor.
+`Physics.SimulateRuntimeStep(fixedDeltaTime)` is the single entry point, called from
+the `FixedUpdate` loop in `Program.cs`. Each step runs, in order: external-move
+reconciliation, per-body gravity, `stepSimulation`, then publish-back and callback
+dispatch (`OnCollisionEnter/Stay/Exit`, `OnTriggerEnter/...`, Unity-style). The
+script-driven components (`ConstantForce`, `Rotator`, `Oscillator`, ...) tick around it.
 
-`Physics.SimulateRuntimeStep(fixedDeltaTime)` in `RuntimeAPI.cs` is the single entry
-point, called from the `FixedUpdate` loop in `Program.cs`. It runs, in order:
-per-body integration, broadphase pairs, contact resolution, then component ticks
-(`ConstantForce`, `Rotator`, `Oscillator`, ...). Collision callbacks are dispatched
-Unity-style via `OnCollisionEnter/Stay/Exit` and `OnTriggerEnter/...`.
+Sync works in both directions because the host rebuilds the managed scene from native
+state every frame. Each body keeps a `Shadow` position holding whatever the solver last
+published; the native side echoes that value straight back, so any difference is a real
+editor drag or script teleport and is pushed into the body. Do not re-add a
+"dynamic bodies are owned by the solver" guard: it silently drops editor drags, which is
+exactly what a user sees as "I moved it and nothing happened".
 
-BulletSharp 0.11.1 was verified to work here: a sphere dropped from y=5 onto a static
-plane came to rest at exactly y=1.0000. Two things are needed to use it:
+Ordering rules that are easy to get wrong, all verified against the real library:
 
-- The package is `net40`, so it raises `NU1701` on net8.0 and its `.targets` does not
-  copy the native library. Copy `build/net40-client/libbulletc-linux-x64.so` to the
-  output directory as `libbulletc.so` (Windows: `libbulletc-windows-x64.dll`).
-- The `RigidBody` constructors take a single `RigidBodyConstructionInfo`, not
-  `(mass, motionState, shape, inertia)`.
+- Set per-body `Gravity` **after** `AddRigidBody`; the constructor's construction info
+  overwrites it.
+- Kinematic bodies need a `KinematicCharacterController`-free setup: drive them through
+  `MotionState.WorldTransform` and also set `InterpolationWorldTransform`, otherwise the
+  push does not register.
+- `GhostObject` overlap lists stay empty until a `GhostPairCallback` is registered on the
+  broadphase.
+- `Scene.SyncObjects` must run before `Scene.Find`/`AddComponent` in tests; components
+  added to an object the scene has not seen are dropped.
 
-Note that BulletSharp 0.11.1 dates from 2016 and is effectively unmaintained. The
-managed API differs from current BulletSharp docs, so confirm signatures by
-reflection before writing against it.
+BulletSharp 0.11.1 is `net40`, so it raises `NU1701` on net8.0. Its `.targets` only
+renames the native library to `libbulletc.dll`, so on Linux the loader never finds
+`libbulletc.so`. `ForgeEngine.API.csproj` therefore copies
+`build/net40-client/libbulletc-linux-x64.so` (Windows: `-windows-x64.dll`) as a
+`Content` item; content items flow through `GetCopyToOutputDirectoryItems`, so the
+script host and every game project get it for free. The `RigidBody` constructors take a
+single `RigidBodyConstructionInfo`, not `(mass, motionState, shape, inertia)`.
+
+BulletSharp 0.11.1 dates from 2016 and is effectively unmaintained. Its managed API
+differs from current BulletSharp docs, so confirm signatures by reflection before
+writing against it.
 
 ## Working environment notes
 
-This environment has no `ssh` by default and the `GITHUB_TOKEN` is read-only. Pushes
-need a deploy key at `~/.ssh/openhands-forge-engine`. Note that `/tmp` is cleared
+`ssh` is not installed in a fresh container, and the `GITHUB_TOKEN` is read-only for
+this repo, so pushes go through the deploy key at `/workspace/.ssh/forge-engine-deploy`
+(wired up via `core.sshCommand`). The container may recreate `/workspace/.ssh` with
+group-writable permissions, which makes OpenSSH reject the key; run
+`chmod 700 /workspace/.ssh && chmod 600 /workspace/.ssh/forge-engine-deploy` before
+pushing. Install the client with `sudo apt-get update && sudo apt-get install -y
+openssh-client` (the user is in the `sudo` group, and `apt-get update` is required
+first or the package has "no installation candidate"). Note that `/tmp` is cleared
 between sessions, so keep any tooling you install under `/workspace`.
+
+The .NET SDK is not on `PATH`; use `/workspace/dotnet/dotnet`. Set
+`DOTNET_CLI_TELEMETRY_OPTOUT=1` and `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` to keep
+builds quiet and offline.
