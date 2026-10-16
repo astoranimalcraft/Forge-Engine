@@ -122,6 +122,59 @@ There is no native physics library and no general collision solver.
 `Scene` format versioning is handled by the `v8`/`v9` markers in the loader; keep
 older markers loadable when extending the format.
 
+### Building and testing the C# side on Linux
+
+`ForgeEngine.API` and `ForgeScriptHost` are plain `net8.0` and have no Windows
+dependency, so they build and run on Linux even though the engine itself does not.
+This is the only part of the project that can be executed here, and it is worth
+using: physics and component logic can be tested for real instead of by inspection.
+
+The SDK is not on the system path. It was installed to `/workspace/dotnet`:
+
+```sh
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1   # the image has no libicu and apt cannot provide it
+/workspace/dotnet/dotnet build ForgeEngine/Scripting/ForgeEngine.API
+/workspace/dotnet/dotnet build ForgeEngine/Scripting/ForgeScriptHost
+```
+
+`DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` is required. Without it the CLI aborts with
+"Couldn't find a valid ICU package" before doing anything.
+
+### The pipe protocol
+
+The engine writes one `FRAME|...` line per tick, then one `OBJ|...` line per object,
+then `END`; `SET|...` lines carry transforms back from scripts. New per-object fields
+are appended to `OBJ` and guarded by length checks (`p.Length >= 26`, `>= 37`), so
+adding a field is backward compatible as long as the reader keeps its bounds check.
+`OBJ` field order must stay in sync between `ScriptRuntime.cpp` (writer) and
+`Program.cs` (reader).
+
+### Physics: adding a real solver
+
+There is no native physics. `Collider` exposes `effectiveRadius` (half the largest
+scaled collider axis), and `SphereCollider`/`BoxCollider`/`CapsuleCollider` currently
+differ only in how they set the size vector.
+
+`Physics.SimulateRuntimeStep(fixedDeltaTime)` in `RuntimeAPI.cs` is the single entry
+point, called from the `FixedUpdate` loop in `Program.cs`. It runs, in order:
+per-body integration, broadphase pairs, contact resolution, then component ticks
+(`ConstantForce`, `Rotator`, `Oscillator`, ...). Collision callbacks are dispatched
+Unity-style via `OnCollisionEnter/Stay/Exit` and `OnTriggerEnter/...`.
+
+BulletSharp 0.11.1 was verified to work here: a sphere dropped from y=5 onto a static
+plane came to rest at exactly y=1.0000. Two things are needed to use it:
+
+- The package is `net40`, so it raises `NU1701` on net8.0 and its `.targets` does not
+  copy the native library. Copy `build/net40-client/libbulletc-linux-x64.so` to the
+  output directory as `libbulletc.so` (Windows: `libbulletc-windows-x64.dll`).
+- The `RigidBody` constructors take a single `RigidBodyConstructionInfo`, not
+  `(mass, motionState, shape, inertia)`.
+
+Note that BulletSharp 0.11.1 dates from 2016 and is effectively unmaintained. The
+managed API differs from current BulletSharp docs, so confirm signatures by
+reflection before writing against it.
+
 ## Working environment notes
 
 This environment has no `ssh` by default and the `GITHUB_TOKEN` is read-only. Pushes
