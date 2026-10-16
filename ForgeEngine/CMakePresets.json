@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-ninja",
+      "displayName": "Windows x64 (Ninja Multi-Config)",
+      "description": "Uses the MSVC environment from Visual Studio Developer PowerShell.",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/out/build/windows-ninja"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Build Debug x64",
+      "configurePreset": "windows-ninja",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "displayName": "Build Release x64",
+      "configurePreset": "windows-ninja",
+      "configuration": "Release"
+    }
+  ]
+}

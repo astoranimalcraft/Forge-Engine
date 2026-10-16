@@ -1,0 +1,19 @@
+{
+  "axes": [
+    { "name": "Horizontal", "source": "Keys", "negative": ["A", "LeftArrow"], "positive": ["D", "RightArrow"], "smoothing": 0 },
+    { "name": "Vertical", "source": "Keys", "negative": ["S", "DownArrow"], "positive": ["W", "UpArrow"], "smoothing": 0 },
+    { "name": "Turn", "source": "Keys", "negative": ["Q"], "positive": ["E"], "smoothing": 0 },
+    { "name": "Mouse X", "source": "mouseDeltaX", "smoothing": 0 },
+    { "name": "Mouse Y", "source": "mouseDeltaY", "smoothing": 0 },
+    { "name": "Mouse ScrollWheel", "source": "mouseScroll", "smoothing": 0 }
+  ],
+  "buttons": [
+    { "name": "Jump", "keys": ["Space"] },
+    { "name": "Fire1", "keys": ["MouseLeft", "LeftCtrl"] },
+    { "name": "Fire2", "keys": ["MouseRight"] },
+    { "name": "Fire3", "keys": ["MouseMiddle"] },
+    { "name": "Run", "keys": ["LeftShift"] },
+    { "name": "Submit", "keys": ["Enter", "Space"] },
+    { "name": "Cancel", "keys": ["Escape"] }
+  ]
+}

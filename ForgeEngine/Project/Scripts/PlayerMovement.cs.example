@@ -1,0 +1,46 @@
+// Modelo de exemplo copiado para Scripts/PlayerMovement.cs em todo projeto novo.
+// Todos os nomes de eixo/botão abaixo ("Horizontal", "Turn", "Jump", "Fire1")
+// são definidos em Config/Inputs.json — troque as teclas lá sem mexer neste código.
+using ForgeEngine;
+
+public sealed class PlayerMovement : MonoBehaviour
+{
+    public float moveSpeed = 5f;
+    public float rotateSpeed = 90f;
+    public float jumpPower = 4f;
+
+    private Rigidbody? body;
+    private AudioSource? sound;
+
+    public override void Start()
+    {
+        Debug.Log($"{gameObject.name}: PlayerMovement started");
+        body = GetComponent<Rigidbody>();      // opcional: o script funciona sem física
+        sound = GetComponent<AudioSource>();
+    }
+
+    public override void Update()
+    {
+        var direction = new Vector3(
+            Input.GetAxisRaw("Horizontal"),
+            0f,
+            Input.GetAxisRaw("Vertical"));
+        if (direction.sqrMagnitude > 1f)
+            direction = direction.normalized;
+        transform.position += direction * moveSpeed * Time.deltaTime;
+
+        float turn = Input.GetAxisRaw("Turn"); // Q/E por padrão
+        if (turn != 0f)
+            transform.Rotate(0f, turn * rotateSpeed * Time.deltaTime, 0f);
+
+        if (Input.GetButtonDown("Jump"))
+        {
+            if (body is not null) body.AddForce(new Vector3(0f, jumpPower, 0f));
+            else transform.position += new Vector3(0f, 0.4f, 0f);
+            sound?.PlayOneShot();
+        }
+
+        if (Input.GetButtonDown("Fire1"))
+            Debug.Log($"Viewport cursor: {Input.mousePosition}");
+    }
+}
