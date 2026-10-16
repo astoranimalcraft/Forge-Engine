@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(ForgeEngine
-    VERSION 0.5.10
+    VERSION 0.5.11
     DESCRIPTION "Modern C++17 DirectX 12 3D engine, C# scripting API and editor"
     LANGUAGES C CXX
 )
