@@ -7,9 +7,25 @@ ForgeEngine is English. doesn't has portuguese.
 
 # Programming Language
 the structure of Forge Engine is created in C++
-but you can use C# for program in Games on Forge Engine.
+but you can use C# for program a Game on Forge Engine.
 
 # Graphics on Engine
 Forge Engine use HLSL for construct Shader.
 
-**Portuguese**
+
+# PORTUGUESE
+
+# Forge-Engine 
+
+é uma "Game Engine" criado com IA e por Hobby. esse é um pequeno projeto simples criado por Astor em C++ e DirectX12
+
+# Linguagem da Engine
+ForgeEngine é Ingles. não tem portugues
+
+# Linguagem de programação
+a estrutura da engi foi criado em C++
+mas você pode usar C# para programar um jogo na Forge Engine
+
+# Graficos na Engine
+Forge Engine usa HLSL para construir Shader
+
