@@ -9,6 +9,6 @@
     <RootNamespace>GameScripts</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../Scripting/ForgeEngine.API/ForgeEngine.API.csproj" />
+    <ProjectReference Include="../../../Scripting/ForgeEngine.API/ForgeEngine.API.csproj" />
   </ItemGroup>
 </Project>

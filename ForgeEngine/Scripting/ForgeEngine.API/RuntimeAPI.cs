@@ -186,7 +186,7 @@ public struct Quaternion
             float sinY = Mathf.Clamp(2f*(q.y*q.w - q.x*q.z), -1f, 1f);
             float yDeg = MathF.Asin(sinY) * Mathf.Rad2Deg;
             float xDeg = MathF.Atan2(2f*(q.x*q.w + q.y*q.z), 1f - 2f*(q.x*q.x + q.y*q.y)) * Mathf.Rad2Deg;
-            float zDeg = MathF.Atan2(2f*(q.y*q.x + q.z*q.w), 1f - 2f*(q.x*q.x + q.z*q.z)) * Mathf.Rad2Deg;
+            float zDeg = MathF.Atan2(2f*(q.z*q.w + q.x*q.y), 1f - 2f*(q.y*q.y + q.z*q.z)) * Mathf.Rad2Deg;
             // Normalize into [0, 360) so values round-trip through Transform.rotation predictably.
             return new Vector3(Wrap360(xDeg), Wrap360(yDeg), Wrap360(zDeg));
         }
@@ -656,6 +656,15 @@ public class Collider : Component
     public bool isTrigger { get => gameObject.State.IsTrigger; set => gameObject.State.IsTrigger = value; }
     public Vector3 size { get => gameObject.State.ColliderSize; set => gameObject.State.ColliderSize = MaxSize(value); }
 
+    /// <summary>Surface friction used by the solver. Defaults to <see cref="Physics.defaultFriction"/>.</summary>
+    public float friction { get; set; } = Physics.defaultFriction;
+
+    /// <summary>Bounciness (restitution) used by the solver. Defaults to <see cref="Physics.defaultRestitution"/>.</summary>
+    public float bounciness { get; set; } = Physics.defaultRestitution;
+
+    /// <summary>How much this collider resists interpenetration, 0..1.</summary>
+    public float contactOffset { get; set; } = 0.01f;
+
     /// <summary>Physics radius in world space: half of the largest collider axis after the object's scale, so the collision grows with the scale gizmo.</summary>
     public float effectiveRadius
     {
@@ -695,32 +704,89 @@ public sealed class CapsuleCollider : Collider
     public float height { get => gameObject.State.ColliderSize.y; set => SetSizeY(value); }
 }
 
-/// <summary>Rigid body synchronized with the native object. Velocity is simulated by the scripting runtime.</summary>
+/// <summary>
+/// Rigid body simulated by Bullet. The body is created from this object's
+/// Collider, so a Collider component is required for the shape.
+/// </summary>
 public sealed class Rigidbody : Component
 {
-    public Vector3 velocity { get; set; } = Vector3.zero;
+    /// <summary>Linear velocity in world units per second, read and written through the solver.</summary>
+    public Vector3 velocity
+    {
+        get => Physics.ReadVelocity(gameObject.State.Id, _cachedVelocity);
+        set { _cachedVelocity = value; Physics.WriteVelocity(gameObject.State.Id, value); }
+    }
+
+    /// <summary>Angular velocity in degrees per second.</summary>
+    public Vector3 angularVelocity
+    {
+        get => Physics.ReadAngularVelocity(gameObject.State.Id, Vector3.zero);
+        set => Physics.WriteAngularVelocity(gameObject.State.Id, value);
+    }
+
     public float mass { get => gameObject.State.Mass; set => gameObject.State.Mass = MathF.Max(0.01f, value); }
     public float drag { get; set; }
+    public float angularDrag { get; set; } = 0.05f;
     public bool useGravity { get => gameObject.State.UseGravity; set => gameObject.State.UseGravity = value; }
     public bool isKinematic { get => gameObject.State.IsKinematic; set => gameObject.State.IsKinematic = value; }
-    public void AddForce(Vector3 force) { if (!isKinematic) _pendingForce += force; }
-    public void AddImpulse(Vector3 impulse) { if (!isKinematic) velocity += impulse / MathF.Max(0.001f, mass); }
+
+    /// <summary>Freezes motion along individual world axes.</summary>
+    public bool freezePositionX { get; set; }
+    public bool freezePositionY { get; set; }
+    public bool freezePositionZ { get; set; }
+    public bool freezeRotationX { get; set; }
+    public bool freezeRotationY { get; set; }
+    public bool freezeRotationZ { get; set; }
+
+    private Vector3 _cachedVelocity;
     private Vector3 _pendingForce;
+
+    /// <summary>Queues a continuous force, applied during the next fixed step.</summary>
+    public void AddForce(Vector3 force) { if (!isKinematic) _pendingForce += force; }
+    public void AddForce(Vector3 force, ForceMode mode)
+    {
+        if (isKinematic) return;
+        switch (mode)
+        {
+            case ForceMode.Impulse: AddImpulse(force); break;
+            case ForceMode.VelocityChange: velocity += force; break;
+            case ForceMode.Acceleration: _pendingForce += force * mass; break;
+            default: _pendingForce += force; break;
+        }
+    }
+    public void AddForceAtPosition(Vector3 force, Vector3 position)
+    {
+        if (isKinematic) return;
+        Physics.ApplyForceAtPosition(gameObject.State.Id, force, position);
+    }
+    public void AddImpulse(Vector3 impulse) { if (!isKinematic) Physics.ApplyImpulse(gameObject.State.Id, impulse); }
+    public void AddTorque(Vector3 torque) { if (!isKinematic) Physics.ApplyTorque(gameObject.State.Id, torque); }
+
+    /// <summary>Puts the body to sleep until something touches it or <see cref="WakeUp"/> is called.</summary>
+    public void Sleep() => Physics.Sleep(gameObject.State.Id);
+    public void WakeUp() => Physics.WakeUp(gameObject.State.Id);
+    public bool IsSleeping() => Physics.IsSleeping(gameObject.State.Id);
+
     internal void Simulate(float dt)
     {
         if (!enabled || isKinematic || dt <= 0) return;
-        if (useGravity) velocity += Physics.gravity * dt;
-        velocity += _pendingForce * dt / MathF.Max(0.001f, mass);
-        _pendingForce = Vector3.zero;
-        velocity *= 1f / (1f + MathF.Max(0, drag) * dt);
-        transform.position += velocity * dt;
-        var collider = gameObject.GetComponent<Collider>();
-        if (collider is not null && transform.position.y < collider.effectiveRadius)
+        if (_pendingForce != Vector3.zero)
         {
-            transform.position = new Vector3(transform.position.x, collider.effectiveRadius, transform.position.z);
-            if (velocity.y < 0) velocity = new Vector3(velocity.x, 0, velocity.z);
+            Physics.ApplyForce(gameObject.State.Id, _pendingForce);
+            _pendingForce = Vector3.zero;
         }
+        Physics.SetConstraints(gameObject.State.Id, freezePositionX, freezePositionY, freezePositionZ,
+            freezeRotationX, freezeRotationY, freezeRotationZ);
     }
+}
+
+/// <summary>How an added force should be interpreted, mirroring Unity.</summary>
+public enum ForceMode
+{
+    Force = 0,
+    Acceleration = 1,
+    Impulse = 2,
+    VelocityChange = 3
 }
 
 /// <summary>Camera component. Mirrors the native camera fields and exposes Unity-style helpers.</summary>
@@ -859,219 +925,6 @@ public struct RaycastHit
     public float distance;
     public Collider? collider;
     public GameObject? gameObject => collider?.gameObject;
-}
-
-public static class Physics
-{
-    public static Vector3 gravity { get; set; } = new(0, -9.81f, 0);
-
-    private static readonly Dictionary<long, (Collider A, Collider B)> CollisionContacts = new();
-    private static readonly Dictionary<long, (Collider A, Collider B)> TriggerContacts = new();
-    private static long PairKey(int a, int b) => a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
-
-    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hit, float maxDistance = 1000f)
-        => Raycast(new Ray(origin, direction), out hit, maxDistance);
-
-    public static bool Raycast(Ray ray, out RaycastHit hit, float maxDistance = 1000f)
-    {
-        hit = default;
-        float closest = MathF.Max(0, maxDistance);
-        bool found = false;
-        foreach (var go in Scene.gameObjects)
-        {
-            var collider = go.GetComponent<Collider>();
-            if (collider is null || !collider.enabled) continue;
-            float radius = collider.effectiveRadius;
-            Vector3 offset = ray.origin - go.transform.position;
-            float b = Vector3.Dot(offset, ray.direction);
-            float c = offset.sqrMagnitude - radius * radius;
-            float discriminant = b * b - c;
-            if (discriminant < 0) continue;
-            float distance = -b - MathF.Sqrt(discriminant);
-            if (distance < 0) distance = -b + MathF.Sqrt(discriminant);
-            if (distance < 0 || distance > closest) continue;
-            closest = distance; found = true;
-            Vector3 point = ray.GetPoint(distance);
-            hit = new RaycastHit { point = point, normal = (point - go.transform.position).normalized, distance = distance, collider = collider };
-        }
-        return found;
-    }
-    public static Collider[] OverlapSphere(Vector3 center, float radius)
-    {
-        var results = new List<Collider>();
-        foreach (var go in Scene.gameObjects)
-        {
-            var collider = go.GetComponent<Collider>();
-            if (collider is null || !collider.enabled) continue;
-            if (Vector3.Distance(center, go.transform.position) <= radius + collider.effectiveRadius)
-                results.Add(collider);
-        }
-        return results.ToArray();
-    }
-    public static void SimulateRuntimeStep(float fixedDeltaTime)
-    {
-        foreach (var go in Scene.gameObjects)
-            foreach (var body in go.GetComponents<Rigidbody>()) body.Simulate(fixedDeltaTime);
-
-        var participants = new List<(GameObject Go, Collider Col)>();
-        foreach (var go in Scene.gameObjects)
-        {
-            if (!go.activeSelf) continue;
-            var col = go.GetComponent<Collider>();
-            if (col is null || !col.enabled) continue;
-            participants.Add((go, col));
-        }
-
-        var liveCollision = new HashSet<long>();
-        var liveTrigger = new HashSet<long>();
-
-        for (int i = 0; i < participants.Count; ++i)
-        {
-            for (int j = i + 1; j < participants.Count; ++j)
-            {
-                var (goA, colA) = participants[i];
-                var (goB, colB) = participants[j];
-                Vector3 delta = goB.transform.position - goA.transform.position;
-                float distance = delta.magnitude;
-                float minDistance = colA.effectiveRadius + colB.effectiveRadius;
-                if (distance > minDistance) continue;
-
-                long key = PairKey(goA.State.Id, goB.State.Id);
-                Vector3 normal = distance > 1e-5f ? delta / distance : Vector3.up;
-                Vector3 point = goA.transform.position + normal * (minDistance * 0.5f);
-                var contacts = new[] { new ContactPoint { point = point, normal = normal } };
-
-                if (colA.isTrigger || colB.isTrigger)
-                {
-                    liveTrigger.Add(key);
-                    bool entered = !TriggerContacts.ContainsKey(key);
-                    TriggerContacts[key] = (colA, colB);
-                    DispatchTrigger(goA, colB, entered);
-                    DispatchTrigger(goB, colA, entered);
-                    continue;
-                }
-
-                liveCollision.Add(key);
-                Vector3 velocityA = VelocityOf(goA), velocityB = VelocityOf(goB);
-                Vector3 relativeVelocity = velocityB - velocityA;
-                float invA = InverseMass(goA), invB = InverseMass(goB);
-                float total = invA + invB;
-                Vector3 impulse = Vector3.zero;
-                float penetration = minDistance - distance;
-                if (total > 0f)
-                {
-                    if (penetration > 0f)
-                    {
-                        Vector3 correction = normal * (penetration / total * 0.8f);
-                        goA.transform.position -= correction * invA;
-                        goB.transform.position += correction * invB;
-                    }
-                    float separating = Vector3.Dot(relativeVelocity, normal);
-                    if (separating < 0f)
-                    {
-                        impulse = normal * (-separating / total);
-                        ApplyImpulse(goA, -impulse * invA);
-                        ApplyImpulse(goB, impulse * invB);
-                        relativeVelocity = VelocityOf(goB) - VelocityOf(goA);
-                    }
-                }
-                bool enteredCollision = !CollisionContacts.ContainsKey(key);
-                CollisionContacts[key] = (colA, colB);
-                DispatchCollision(goA, goB, colB, relativeVelocity, impulse, contacts, enteredCollision);
-                var flippedContacts = new[] { new ContactPoint { point = point, normal = -normal } };
-                DispatchCollision(goB, goA, colA, -relativeVelocity, -impulse, flippedContacts, enteredCollision);
-            }
-        }
-
-        CloseOldContacts(CollisionContacts, liveCollision, false);
-        CloseOldContacts(TriggerContacts, liveTrigger, true);
-
-        foreach (var go in Scene.gameObjects)
-        {
-            if (!go.activeSelf) continue;
-            foreach (var force in go.GetComponents<ConstantForce>()) force.Simulate(fixedDeltaTime);
-            foreach (var auto in go.GetComponents<AutoDestroy>()) auto.Tick(fixedDeltaTime);
-            foreach (var aim in go.GetComponents<LookAtTarget>()) aim.Apply();
-            foreach (var spin in go.GetComponents<Rotator>()) spin.Tick(fixedDeltaTime);
-            foreach (var hover in go.GetComponents<Oscillator>()) hover.Tick(fixedDeltaTime);
-            foreach (var kill in go.GetComponents<KillBelowY>()) kill.Tick(fixedDeltaTime);
-            foreach (var pulse in go.GetComponents<MaterialPulse>()) pulse.Tick(fixedDeltaTime);
-        }
-    }
-
-    private static Vector3 VelocityOf(GameObject go)
-    {
-        var rb = go.GetComponent<Rigidbody>();
-        return rb is { enabled: true, isKinematic: false } ? rb.velocity : Vector3.zero;
-    }
-    private static float InverseMass(GameObject go)
-    {
-        var rb = go.GetComponent<Rigidbody>();
-        if (rb is null || !rb.enabled || rb.isKinematic) return 0f;
-        return 1f / MathF.Max(0.01f, rb.mass);
-    }
-    private static void ApplyImpulse(GameObject go, Vector3 velocityChange)
-    {
-        var rb = go.GetComponent<Rigidbody>();
-        if (rb is { enabled: true, isKinematic: false }) rb.velocity += velocityChange;
-    }
-    private static void DispatchCollision(GameObject target, GameObject other, Collider otherCollider,
-        Vector3 relativeVelocity, Vector3 impulse, ContactPoint[] contacts, bool entered)
-    {
-        var collision = new Collision
-        {
-            gameObject = other,
-            collider = otherCollider,
-            relativeVelocity = relativeVelocity,
-            impulse = impulse,
-            contacts = contacts
-        };
-        foreach (var script in target.GetComponents<MonoBehaviour>())
-        {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            if (entered) script.OnCollisionEnter(collision);
-            else script.OnCollisionStay(collision);
-        }
-    }
-    private static void DispatchTrigger(GameObject target, Collider other, bool entered)
-    {
-        foreach (var script in target.GetComponents<MonoBehaviour>())
-        {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            if (entered) script.OnTriggerEnter(other);
-            else script.OnTriggerStay(other);
-        }
-    }
-    private static void CloseOldContacts(Dictionary<long, (Collider A, Collider B)> active, HashSet<long> live, bool trigger)
-    {
-        if (active.Count == 0) return;
-        foreach (var (key, pair) in active.ToArray())
-        {
-            if (live.Contains(key)) continue;
-            active.Remove(key);
-            if (pair.A?.gameObject is not { } goA || pair.B?.gameObject is not { } goB) continue;
-            if (Scene.FindById(goA.State.Id) is null || Scene.FindById(goB.State.Id) is null) continue;
-            if (trigger)
-            {
-                DispatchTriggerExit(goA, pair.B);
-                DispatchTriggerExit(goB, pair.A);
-            }
-            else
-            {
-                var contacts = new[] { new ContactPoint { point = goA.transform.position, normal = Vector3.zero } };
-                DispatchCollision(goA, goB, pair.B, Vector3.zero, Vector3.zero, contacts, false);
-                DispatchCollision(goB, goA, pair.A, Vector3.zero, Vector3.zero, contacts, false);
-            }
-        }
-    }
-    private static void DispatchTriggerExit(GameObject target, Collider other)
-    {
-        foreach (var script in target.GetComponents<MonoBehaviour>())
-        {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            script.OnTriggerExit(other);
-        }
-    }
 }
 
 /// <summary>Applies a continuous force to this object's Rigidbody on every fixed step (without a Rigidbody the object is treated as static).</summary>
