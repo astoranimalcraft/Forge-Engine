@@ -1,6 +1,6 @@
 # Forge-Engine
 
-ForgeEngine is a "Game Engine" create With AI and for Hobby. this is a little project simple create by Astor in C++ and DirectX12
+ForgeEngine is a "Game Engine" created With AI and for Hobby. this is a little project simple create by Astor in C++ and DirectX12
 
 # Language Engine
 ForgeEngine is English. doesn't has portuguese.
