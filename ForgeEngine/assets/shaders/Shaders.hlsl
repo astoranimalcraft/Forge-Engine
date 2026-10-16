@@ -201,7 +201,10 @@ float4 PSPBR(SceneVertex input) : SV_TARGET
         float2 duvdx = ddx(input.uv);
         float2 duvdy = ddy(input.uv);
         float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-        if (abs(determinant) > 1.0e-6f)
+        // Epsilon must stay tiny: a UV span of 1.0 across a screen-filling quad yields a
+        // determinant near 1e-7, so the previous 1.0e-6 threshold rejected normal maps
+        // whenever an object was close to the camera and only applied them at a distance.
+        if (abs(determinant) > 1.0e-12f)
         {
             float3 T = normalize((dpdx * duvdy.y - dpdy * duvdx.y) / determinant);
             T = normalize(T - N * dot(N, T));
@@ -418,10 +421,13 @@ float3 ProceduralSky(float3 rayDirection)
     sky = lerp(sky, twilightColor, twilight * (0.42f + 0.35f * sunSide) * (0.30f + 0.70f * daylight));
 
     // Physically-inspired sun disc with derivative antialiasing and atmospheric halo.
+    // smoothstep rises to 1 inside the solar disc, so it must NOT be negated: the
+    // previous "1.0f - smoothstep(...)" evaluated to 1 across the entire sky and added
+    // a full-strength warm sun term to every pixel, which clipped to white after ACES.
     float sunDot = dot(rayDirection, sunDirection);
     float discWidth = max(fwidth(sunDot) * 1.35f, 0.000001f);
-    float disc = 1.0f - smoothstep(cos(radians(0.27f)) - discWidth,
-                                   cos(radians(0.27f)) + discWidth, sunDot);
+    float disc = smoothstep(cos(radians(0.27f)) - discWidth,
+                            cos(radians(0.27f)) + discWidth, sunDot);
     float mie = pow(saturate(sunDot), 16.0f) * 0.14f + pow(saturate(sunDot), 100.0f) * 0.30f;
     float sunVisibility = smoothstep(-0.12f, 0.08f, sunElevation);
     sky += lerp(float3(1.0f, 0.82f, 0.58f), float3(1.0f, 0.95f, 0.82f), daylight) *
@@ -453,7 +459,10 @@ float3 ProceduralSky(float3 rayDirection)
         float2 warpedUV = cloudUV + (float2(warpA, warpB) - 0.5f) * 0.85f;
         float broad = RotatedFBM(warpedUV * 0.62f, 0.2f);
         float detail = RotatedFBM(warpedUV * 2.4f + float2(5.1f, 17.7f), -0.35f);
-        float cloudField = broad * 0.78f + detail * 0.22f;
+        // The FBM sum is heavily skewed low (it rarely exceeds ~0.28), so it must be
+        // remapped to 0..1 before the coverage threshold. Without this the field never
+        // reached `coverage` and the sky rendered completely cloudless.
+        float cloudField = saturate((broad * 0.78f + detail * 0.22f - 0.05f) / 0.23f);
         float clouds = smoothstep(coverage, coverage + 0.30f, cloudField);
         float erosion = smoothstep(0.30f, 0.62f, detail);
         // Keep a visible slate under the lit tops so cumulus never flattens to white.
