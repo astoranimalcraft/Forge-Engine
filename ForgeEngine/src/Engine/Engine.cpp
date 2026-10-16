@@ -1047,7 +1047,11 @@ void ForgeEngine::CreateShadersAndPipelines()
     skyPso.BlendState = DefaultBlend();
     skyPso.SampleMask = UINT_MAX;
     skyPso.RasterizerState = DefaultRasterizer(D3D12_CULL_MODE_NONE);
-    skyPso.DepthStencilState = DefaultDepthStencil(D3D12_COMPARISON_FUNC_ALWAYS, D3D12_DEPTH_WRITE_MASK_ALL);
+    // The sky/grid pass runs FIRST with DepthFunc ALWAYS, so it must not write depth.
+    // With DepthWriteMask ALL it stamped the far-plane depth of the ground grid across
+    // the whole viewport, and every object below y=0 then failed the depth test against
+    // it and disappeared. Zero write mask keeps the grid purely as a backdrop.
+    skyPso.DepthStencilState = DefaultDepthStencil(D3D12_COMPARISON_FUNC_ALWAYS, D3D12_DEPTH_WRITE_MASK_ZERO);
     skyPso.InputLayout = { nullptr, 0 };
     skyPso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     skyPso.NumRenderTargets = 1;
