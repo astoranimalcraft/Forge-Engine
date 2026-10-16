@@ -44,3 +44,5 @@ Projeto Hub com fluxo de carregamento, caption da janela personalizada, organiza
 - [Patch notes v0.5.9 — Céu azul UE5 corrigido, UI moderna com ícones/fonte Segoe, pasta do projeto + recentes persistentes, export Unity-like (resolução/fullscreen/build-and-run), corrotinas C#, Quaternion.Slerp/Inverse, Vector3.SmoothDamp](PATCH_NOTES_v059.md)
 
 - [Patch notes v0.5.10 — Renomeação DX12ForgeEngine → ForgeEngine, céu azul com nuvens volumétricas, PBR com emissive/AO, Inspector com mais componentes + API C#, câmera estilo Unity e export Unity-like](PATCH_NOTES_v0510.md)
+
+- [Patch notes v0.5.11 — Física Bullet real no Rigidbody (BulletSharp), API C# ampliada (ForceMode, torque, freeze de eixos, sleep), sincronização editor↔solver e correção do Quaternion.eulerAngles](PATCH_NOTES_v0511.md)
