@@ -1,6 +1,6 @@
-# Documentação — DX12 Forge Engine
+# Documentação — Forge Engine
 
-Bem-vindo à documentação da DX12 Forge Engine. O projeto é uma engine/editor 3D para Windows, com renderer C++17/DirectX 12 e scripting de gameplay em C#.
+Bem-vindo à documentação da Forge Engine. O projeto é uma engine/editor 3D para Windows, com renderer C++17/DirectX 12 e scripting de gameplay em C#.
 
 ## Comece por aqui
 
@@ -42,3 +42,5 @@ Projeto Hub com fluxo de carregamento, caption da janela personalizada, organiza
 - [Patch notes v0.5.8 — Config/Inputs.json (teclas/eixos/comandos), scaffold de projeto com README e exemplos, eventos OnCollision/OnTrigger, colider escala+junto do gizmo, wireframe de colisão no viewport, ConstantForce/AutoDestroy/LookAtTarget, céu azul definitivo, fim do flicker da barra Assets, texturas/normal map de modelos](PATCH_NOTES_v058.md)
 
 - [Patch notes v0.5.9 — Céu azul UE5 corrigido, UI moderna com ícones/fonte Segoe, pasta do projeto + recentes persistentes, export Unity-like (resolução/fullscreen/build-and-run), corrotinas C#, Quaternion.Slerp/Inverse, Vector3.SmoothDamp](PATCH_NOTES_v059.md)
+
+- [Patch notes v0.5.10 — Renomeação DX12ForgeEngine → ForgeEngine, céu azul com nuvens volumétricas, PBR com emissive/AO, Inspector com mais componentes + API C#, câmera estilo Unity e export Unity-like](PATCH_NOTES_v0510.md)

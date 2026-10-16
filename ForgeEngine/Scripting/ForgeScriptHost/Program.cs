@@ -145,6 +145,31 @@ internal static class Program
                     data.UseGravity = ParseInt(p,35,1) != 0;
                     data.IsKinematic = ParseInt(p,36,0) != 0;
                 }
+                if (p.Length >= 48)
+                {
+                    data.HasMaterial = true;
+                    data.BaseColor = new Vector3(ParseFloat(p,37,1), ParseFloat(p,38,1), ParseFloat(p,39,1));
+                    data.Metallic = Mathf.Clamp01(ParseFloat(p,40,0));
+                    data.Roughness = Mathf.Clamp(ParseFloat(p,41,0.6f), 0.045f, 1f);
+                    data.EmissiveColor = new Vector3(ParseFloat(p,42,0), ParseFloat(p,43,0), ParseFloat(p,44,0));
+                    data.EmissiveIntensity = MathF.Max(0f, ParseFloat(p,45,0));
+                    data.NormalMapScale = MathF.Max(0f, ParseFloat(p,46,1));
+                    data.DoubleSided = ParseInt(p,47,0) != 0;
+                }
+                if (p.Length >= 61)
+                {
+                    data.CameraFieldOfView = ParseFloat(p,48,60);
+                    data.CameraNearClip = ParseFloat(p,49,0.05f);
+                    data.CameraFarClip = ParseFloat(p,50,1000);
+                    data.CameraOrthographic = ParseInt(p,51,0) != 0;
+                    data.CameraOrthographicSize = ParseFloat(p,52,5);
+                    data.CameraDepth = ParseInt(p,53,0);
+                    data.CameraBackgroundColor = new Vector4(ParseFloat(p,54,0.02f), ParseFloat(p,55,0.03f),
+                        ParseFloat(p,56,0.05f), ParseFloat(p,57,1f));
+                    data.CameraDrawSkybox = ParseInt(p,58,1) != 0;
+                    data.CameraDrawGizmos = ParseInt(p,59,1) != 0;
+                    data.CameraCullingMask = ParseInt(p,60,int.MaxValue);
+                }
                 incomingObjects.Add(data);
             }
             else if (p[0] == "SCRIPT" && p.Length >= 4)
@@ -217,7 +242,18 @@ internal static class Program
                 s.ColliderType.ToString(CultureInfo.InvariantCulture),
                 F(s.ColliderSize.x), F(s.ColliderSize.y), F(s.ColliderSize.z),
                 s.IsTrigger ? "1" : "0", s.HasRigidbody ? "1" : "0", F(s.Mass),
-                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0");
+                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0",
+                F(s.BaseColor.x), F(s.BaseColor.y), F(s.BaseColor.z),
+                F(s.Metallic), F(s.Roughness),
+                F(s.EmissiveColor.x), F(s.EmissiveColor.y), F(s.EmissiveColor.z), F(s.EmissiveIntensity),
+                F(s.NormalMapScale), s.DoubleSided ? "1" : "0",
+                F(s.CameraFieldOfView), F(s.CameraNearClip), F(s.CameraFarClip),
+                s.CameraOrthographic ? "1" : "0", F(s.CameraOrthographicSize),
+                s.CameraDepth.ToString(CultureInfo.InvariantCulture),
+                F(s.CameraBackgroundColor.x), F(s.CameraBackgroundColor.y),
+                F(s.CameraBackgroundColor.z), F(s.CameraBackgroundColor.w),
+                s.CameraDrawSkybox ? "1" : "0", s.CameraDrawGizmos ? "1" : "0",
+                s.CameraCullingMask.ToString(CultureInfo.InvariantCulture));
         }
 
         foreach (var command in ForgeRuntimeCommands.Drain())

@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.6 — Sky, Camera Viewport, Project Panel Fixes
+# Forge Engine v0.5.6 — Sky, Camera Viewport, Project Panel Fixes
 
 ## Fixed
 

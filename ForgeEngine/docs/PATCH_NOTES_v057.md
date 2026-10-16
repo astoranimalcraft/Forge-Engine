@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.7 — Exportação de jogo, API Unity-like, céu azul, hierarquia e gizmo
+# Forge Engine v0.5.7 — Exportação de jogo, API Unity-like, céu azul, hierarquia e gizmo
 
 ## 1. Export Game (botão + Ctrl+B)
 - Novo `File → Export Game...` (atalho **Ctrl+B**) abre o modal com: nome do jogo, empresa, criador, ícone (.ico/.png/.bmp) e pasta de saída.

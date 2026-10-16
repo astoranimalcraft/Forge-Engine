@@ -1,8 +1,8 @@
-# DX12 Forge Engine v0.5.5 — ImGui frame assertion hotfix
+# Forge Engine v0.5.5 — ImGui frame assertion hotfix
 
 ## Fix
 
-The Project Hub path in `DX12ForgeEditorUI::Draw()` returned before calling `ImGui::Render()`. Since `DX12ForgeEngine::Render()` calls `BeginFrame()` every frame, the next `ImGui::NewFrame()` detected that the previous frame had not ended and triggered `IM_ASSERT(g.FrameCountEnded == g.FrameCount)` with the message `Forgot to call Render() or EndFrame() at the end of the previous frame?`.
+The Project Hub path in `ForgeEngineEditorUI::Draw()` returned before calling `ImGui::Render()`. Since `ForgeEngine::Render()` calls `BeginFrame()` every frame, the next `ImGui::NewFrame()` detected that the previous frame had not ended and triggered `IM_ASSERT(g.FrameCountEnded == g.FrameCount)` with the message `Forgot to call Render() or EndFrame() at the end of the previous frame?`.
 
 The Project Hub path now calls `ImGui::Render()` before returning. It still passes the draw data to the existing DirectX 12 renderer, which renders the full-screen hub normally. Assertions have not been disabled.
 

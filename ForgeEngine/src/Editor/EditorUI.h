@@ -16,27 +16,27 @@
 #include <utility>
 #include <vector>
 
-class DX12ForgeEngine;
+class ForgeEngine;
 struct ImGui_ImplDX12_InitInfo;
 
-class DX12ForgeEditorUI final
+class ForgeEditorUI final
 {
 public:
-    DX12ForgeEditorUI() = default;
-    ~DX12ForgeEditorUI();
+    ForgeEditorUI() = default;
+    ~ForgeEditorUI();
 
-    bool Initialize(DX12ForgeEngine& engine);
+    bool Initialize(ForgeEngine& engine);
     void Shutdown();
     void BeginFrame();
-    void Draw(DX12ForgeEngine& engine);
-    void TickScripts(DX12ForgeEngine& engine, float deltaSeconds);
-    void RenderDrawData(DX12ForgeEngine& engine);
+    void Draw(ForgeEngine& engine);
+    void TickScripts(ForgeEngine& engine, float deltaSeconds);
+    void RenderDrawData(ForgeEngine& engine);
     void HandleWin32Message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
     bool WantsCaptureKeyboard() const;
     bool WantsCaptureMouse() const;
 
 private:
-    enum class TextureSlot { Albedo, Normal, MetallicRoughness, AmbientOcclusion };
+    enum class TextureSlot { Albedo, Normal, MetallicRoughness, AmbientOcclusion, Emissive };
 
     static void AllocateSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
         D3D12_CPU_DESCRIPTOR_HANDLE* outCpu, D3D12_GPU_DESCRIPTOR_HANDLE* outGpu);
@@ -44,34 +44,34 @@ private:
         D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE gpu);
 
     void ApplyStyle();
-    void DrawWindowChrome(DX12ForgeEngine& engine);
-    void DrawMainMenu(DX12ForgeEngine& engine);
-    void DrawHierarchy(DX12ForgeEngine& engine);
-    void DrawInspector(DX12ForgeEngine& engine);
-    void DrawLightingPanel(DX12ForgeEngine& engine);
-    void DrawProjectBrowser(DX12ForgeEngine& engine);
-    void DrawPostProcessSettings(DX12ForgeEngine& engine);
-    void DrawWelcome(DX12ForgeEngine& engine);
-    bool OpenProject(DX12ForgeEngine& engine, const std::filesystem::path& projectPath);
-    void LoadProjectPostProcess(DX12ForgeEngine& engine);
-    void SaveProjectPostProcess(const DX12ForgeEngine& engine) const;
-    void OpenProjectDialog(DX12ForgeEngine& engine);
-    void CreateProjectFromDialog(DX12ForgeEngine& engine);
+    void DrawWindowChrome(ForgeEngine& engine);
+    void DrawMainMenu(ForgeEngine& engine);
+    void DrawHierarchy(ForgeEngine& engine);
+    void DrawInspector(ForgeEngine& engine);
+    void DrawLightingPanel(ForgeEngine& engine);
+    void DrawProjectBrowser(ForgeEngine& engine);
+    void DrawPostProcessSettings(ForgeEngine& engine);
+    void DrawWelcome(ForgeEngine& engine);
+    bool OpenProject(ForgeEngine& engine, const std::filesystem::path& projectPath);
+    void LoadProjectPostProcess(ForgeEngine& engine);
+    void SaveProjectPostProcess(const ForgeEngine& engine) const;
+    void OpenProjectDialog(ForgeEngine& engine);
+    void CreateProjectFromDialog(ForgeEngine& engine);
     void DrawConsole();
-    void DrawStatsOverlay(DX12ForgeEngine& engine);
-    void RequestViewportScreenshot(DX12ForgeEngine& engine);
+    void DrawStatsOverlay(ForgeEngine& engine);
+    void RequestViewportScreenshot(ForgeEngine& engine);
     void DrawAboutWindow();
     void EnsureDefaultDockLayout(ImGuiID dockspaceId, const ImVec2& size);
 
-    void CreatePrimitive(DX12ForgeEngine& engine, bool sphere);
-    void CreatePrimitiveKind(DX12ForgeEngine& engine, int kind);
-    void CreateLightObject(DX12ForgeEngine& engine, int lightKind);
-    void CreateTerrainObject(DX12ForgeEngine& engine);
-    void CreateCameraObject(DX12ForgeEngine& engine);
-    void ApplyTerrainBrush(DX12ForgeEngine& engine, float worldX, float worldZ, float deltaSeconds);
-    bool InstantiateObj(DX12ForgeEngine& engine, const std::filesystem::path& path);
+    void CreatePrimitive(ForgeEngine& engine, bool sphere);
+    void CreatePrimitiveKind(ForgeEngine& engine, int kind);
+    void CreateLightObject(ForgeEngine& engine, int lightKind);
+    void CreateTerrainObject(ForgeEngine& engine);
+    void CreateCameraObject(ForgeEngine& engine);
+    void ApplyTerrainBrush(ForgeEngine& engine, float worldX, float worldZ, float deltaSeconds);
+    bool InstantiateObj(ForgeEngine& engine, const std::filesystem::path& path);
     void HandleDroppedFiles(HDROP drop);
-    DX12ForgeEngine* m_engine = nullptr;
+    ForgeEngine* m_engine = nullptr;
     int m_dragPreviewObjectIndex = -1;
     int m_dragPreviewPreviousSelection = -1;
     std::wstring m_dragPreviewPath;
@@ -90,30 +90,32 @@ private:
     std::string m_lastReportedTextureError;
     DirectX::XMFLOAT4 m_dragPreviewOriginalColor{ 0.82f, 0.82f, 0.82f, 1.0f };
     bool m_dragPreviewOriginalCastShadows = true;
-    void DuplicateSelected(DX12ForgeEngine& engine);
-    void DeleteSelected(DX12ForgeEngine& engine);
-    void NewScene(DX12ForgeEngine& engine);
-    bool SaveScene(DX12ForgeEngine& engine, const std::filesystem::path& path);
-    bool LoadScene(DX12ForgeEngine& engine, const std::filesystem::path& path);
-    bool SaveSceneDialog(DX12ForgeEngine& engine);
-    bool OpenSceneDialog(DX12ForgeEngine& engine);
+    void DuplicateSelected(ForgeEngine& engine);
+    void DeleteSelected(ForgeEngine& engine);
+    void NewScene(ForgeEngine& engine);
+    bool SaveScene(ForgeEngine& engine, const std::filesystem::path& path);
+    bool LoadScene(ForgeEngine& engine, const std::filesystem::path& path);
+    bool SaveSceneDialog(ForgeEngine& engine);
+    bool OpenSceneDialog(ForgeEngine& engine);
     void ImportAssetDialog();
     std::filesystem::path ImportFile(const std::filesystem::path& source, const std::wstring& forcedCategory = L"");
-    void BrowseTexture(DX12ForgeEngine& engine, TextureSlot slot);
-    void AssignSelectedAsset(DX12ForgeEngine& engine, TextureSlot slot);
+    void BrowseTexture(ForgeEngine& engine, TextureSlot slot);
+    void AssignSelectedAsset(ForgeEngine& engine, TextureSlot slot);
     void Log(const std::string& message);
     std::filesystem::path DetectSourceRoot(const std::filesystem::path& executableDirectory) const;
+    std::filesystem::path ResolveStandaloneDataRoot(const std::filesystem::path& executableDirectory,
+        const std::wstring& dataFolder) const;
     std::filesystem::path CategoryForExtension(const std::filesystem::path& path) const;
     std::string RelativeAssetPath(const std::filesystem::path& path) const;
     std::filesystem::path ResolveAssetPath(const std::string& relativePath) const;
     void ResetDockLayout();
     bool CompileScripts(bool logSuccess = true);
-    void StartPlayMode(DX12ForgeEngine& engine);
-    void StopPlayMode(DX12ForgeEngine& engine);
-    void ExportGame(DX12ForgeEngine& engine);
-    void DrawExportModal(DX12ForgeEngine& engine);
+    void StartPlayMode(ForgeEngine& engine);
+    void StopPlayMode(ForgeEngine& engine);
+    void ExportGame(ForgeEngine& engine);
+    void DrawExportModal(ForgeEngine& engine);
     void RequestCreateScript(int objectIndex);
-    bool CreateAndAttachScript(DX12ForgeEngine& engine);
+    bool CreateAndAttachScript(ForgeEngine& engine);
     struct AssetListingEntry
     {
         std::filesystem::path path;
@@ -126,7 +128,7 @@ private:
     void OpenScriptInVisualStudio(const std::filesystem::path& scriptFile);
     std::filesystem::path FindVisualStudioExecutable() const;
     std::string CalculateScriptSourceSignature() const;
-    void PollScriptFileChanges(DX12ForgeEngine& engine);
+    void PollScriptFileChanges(ForgeEngine& engine);
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvHeap;
     std::array<bool, 1024> m_srvSlots{};
@@ -190,7 +192,7 @@ private:
     bool m_openPostProcessFromMenu = false;
     bool m_openExportModal = false;
     char m_exportProductName[256] = "MyForgeGame";
-    char m_exportCompanyName[256] = "DX12 Forge";
+    char m_exportCompanyName[256] = "Forge Engine";
     char m_exportCreatorName[256] = "";
     char m_exportIconPath[512] = "";
     char m_exportOutputDir[512] = "";

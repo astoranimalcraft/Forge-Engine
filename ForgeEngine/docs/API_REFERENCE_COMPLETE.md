@@ -1,4 +1,4 @@
-# DX12 Forge Engine — Referência da API (v0.5.0)
+# Forge Engine — Referência da API (v0.5.0)
 
 Esta referência descreve a superfície pública que existe neste pacote. Ela não promete funcionalidades que ainda não estão ligadas ao renderer nativo.
 

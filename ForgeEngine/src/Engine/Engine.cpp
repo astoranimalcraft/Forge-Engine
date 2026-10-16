@@ -136,9 +136,9 @@ namespace
     constexpr int IdRoughnessEdit = 121;
 }
 
-DX12ForgeEngine::DX12ForgeEngine() = default;
+ForgeEngine::ForgeEngine() = default;
 
-DX12ForgeEngine::~DX12ForgeEngine()
+ForgeEngine::~ForgeEngine()
 {
     SetCursorHidden(false);
     DestroyStartupSplash();
@@ -167,7 +167,7 @@ DX12ForgeEngine::~DX12ForgeEngine()
     if (m_comInitialized) CoUninitialize();
 }
 
-void DX12ForgeEngine::ThrowIfFailed(HRESULT hr, const char* operation)
+void ForgeEngine::ThrowIfFailed(HRESULT hr, const char* operation)
 {
     if (FAILED(hr))
     {
@@ -178,7 +178,7 @@ void DX12ForgeEngine::ThrowIfFailed(HRESULT hr, const char* operation)
     }
 }
 
-D3D12_RESOURCE_BARRIER DX12ForgeEngine::TransitionBarrier(ID3D12Resource* resource,
+D3D12_RESOURCE_BARRIER ForgeEngine::TransitionBarrier(ID3D12Resource* resource,
     D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
 {
     D3D12_RESOURCE_BARRIER barrier{};
@@ -191,7 +191,7 @@ D3D12_RESOURCE_BARRIER DX12ForgeEngine::TransitionBarrier(ID3D12Resource* resour
     return barrier;
 }
 
-UINT DX12ForgeEngine::AlignConstantBufferSize(UINT size)
+UINT ForgeEngine::AlignConstantBufferSize(UINT size)
 {
     return (size + ConstantBufferAlignment - 1u) & ~(ConstantBufferAlignment - 1u);
 }
@@ -209,7 +209,7 @@ namespace
     }
 }
 
-void DX12ForgeEngine::LoadGameConfig()
+void ForgeEngine::LoadGameConfig()
 {
     std::array<wchar_t, 32768> buffer{};
     const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -220,7 +220,7 @@ void DX12ForgeEngine::LoadGameConfig()
     std::ifstream ini(iniPath, std::ios::binary);
     if (!ini) return;
 
-    std::wstring product, company, creator, icon;
+    std::wstring product, company, creator, icon, dataFolder;
     std::string line;
     auto trim = [](std::string& text)
     {
@@ -241,12 +241,15 @@ void DX12ForgeEngine::LoadGameConfig()
         else if (key == "company") company = wideValue;
         else if (key == "creator") creator = wideValue;
         else if (key == "icon") icon = wideValue;
+        else if (key == "datafolder") dataFolder = wideValue;
+        else if (key == "project") dataFolder = wideValue; // legacy key kept for older exports
     }
 
     m_standalonePlayer = true;
     m_editorOverlayEnabled = false;
-    m_gameTitle = product.empty() ? std::wstring(L"DX12 Forge Game") : product;
+    m_gameTitle = product.empty() ? std::wstring(L"Forge Engine Game") : product;
     m_gameCreator = creator;
+    m_gameProjectFolder = dataFolder;
     if (!icon.empty())
     {
         std::filesystem::path iconPath(icon);
@@ -256,7 +259,7 @@ void DX12ForgeEngine::LoadGameConfig()
     (void)company;
 }
 
-void DX12ForgeEngine::ApplyGameIcon()
+void ForgeEngine::ApplyGameIcon()
 {
     if (m_gameIconPath.empty() || !m_hwnd) return;
     std::error_code ec;
@@ -331,7 +334,7 @@ void DX12ForgeEngine::ApplyGameIcon()
     if (smallIcon) SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
 }
 
-bool DX12ForgeEngine::Initialize(HINSTANCE instance, int showCommand)
+bool ForgeEngine::Initialize(HINSTANCE instance, int showCommand)
 {
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     m_comInitialized = SUCCEEDED(comResult);
@@ -358,26 +361,26 @@ bool DX12ForgeEngine::Initialize(HINSTANCE instance, int showCommand)
     CreateColliderWireMeshes();
     CreateConstantBuffers();
     UpdateStartupSplash(88, L"Loading project files and initializing the editor UI...");
-    m_editorUI = std::make_unique<DX12ForgeEditorUI>();
+    m_editorUI = std::make_unique<ForgeEditorUI>();
     if (!m_editorUI->Initialize(*this))
         throw std::runtime_error("Nao foi possivel inicializar Dear ImGui + ImGuizmo.");
 
     m_startTime = std::chrono::steady_clock::now();
     m_initialized = true;
-    UpdateStartupSplash(100, L"Ready. Opening DX12 Forge Project Hub...");
+    UpdateStartupSplash(100, L"Ready. Opening Forge Engine Project Hub...");
     DestroyStartupSplash();
     ShowWindow(m_hwnd, showCommand);
     UpdateWindow(m_hwnd);
     return true;
 }
 
-LRESULT CALLBACK DX12ForgeEngine::SplashWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK ForgeEngine::SplashWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    DX12ForgeEngine* self = reinterpret_cast<DX12ForgeEngine*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    ForgeEngine* self = reinterpret_cast<ForgeEngine*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE)
     {
         auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
-        self = static_cast<DX12ForgeEngine*>(create->lpCreateParams);
+        self = static_cast<ForgeEngine*>(create->lpCreateParams);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (message == WM_PAINT)
@@ -395,7 +398,7 @@ LRESULT CALLBACK DX12ForgeEngine::SplashWindowProc(HWND hwnd, UINT message, WPAR
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         HGDIOBJ old = ::SelectObject(dc, reinterpret_cast<HGDIOBJ>(titleFont));
         RECT title{ 34, 38, r.right - 34, 84 };
-        DrawTextW(dc, L"DX12 FORGE ENGINE", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(dc, L"FORGE ENGINE", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         ::SelectObject(dc, reinterpret_cast<HGDIOBJ>(bodyFont));
         SetTextColor(dc, RGB(154, 168, 193));
         RECT subtitle{ 36, 84, r.right - 34, 112 };
@@ -420,23 +423,23 @@ LRESULT CALLBACK DX12ForgeEngine::SplashWindowProc(HWND hwnd, UINT message, WPAR
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-void DX12ForgeEngine::CreateStartupSplash(HINSTANCE instance)
+void ForgeEngine::CreateStartupSplash(HINSTANCE instance)
 {
     m_splashProgress = 0;
     m_splashMessage = L"Preparing project...";
-    const wchar_t* className = L"DX12ForgeStartupSplash";
+    const wchar_t* className = L"ForgeEngineStartupSplash";
     WNDCLASSEXW wc{}; wc.cbSize = sizeof(wc); wc.lpfnWndProc = SplashWindowProc;
     wc.hInstance = instance; wc.hCursor = LoadCursorW(nullptr, IDC_ARROW); wc.lpszClassName = className;
     RegisterClassExW(&wc);
     const int width = 620, height = 290;
     const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
-    m_splashHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, className, L"DX12 Forge Engine",
+    m_splashHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, className, L"Forge Engine",
         WS_POPUP | WS_BORDER, x, y, width, height, nullptr, nullptr, instance, this);
     if (m_splashHwnd) { ShowWindow(m_splashHwnd, SW_SHOWNORMAL); UpdateWindow(m_splashHwnd); }
 }
 
-void DX12ForgeEngine::UpdateStartupSplash(int percent, const wchar_t* message)
+void ForgeEngine::UpdateStartupSplash(int percent, const wchar_t* message)
 {
     m_splashProgress = std::clamp(percent, 0, 100);
     m_splashMessage = message ? message : L"Loading...";
@@ -452,16 +455,16 @@ void DX12ForgeEngine::UpdateStartupSplash(int percent, const wchar_t* message)
     }
 }
 
-void DX12ForgeEngine::DestroyStartupSplash()
+void ForgeEngine::DestroyStartupSplash()
 {
     if (m_splashHwnd && IsWindow(m_splashHwnd)) DestroyWindow(m_splashHwnd);
     m_splashHwnd = nullptr;
 }
 
-void DX12ForgeEngine::CreateWindowAndDevice(HINSTANCE instance, int showCommand)
+void ForgeEngine::CreateWindowAndDevice(HINSTANCE instance, int showCommand)
 {
     (void)showCommand;
-    const wchar_t* className = L"DX12ForgeEngineWindowClass";
+    const wchar_t* className = L"ForgeEngineWindowClass";
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -484,7 +487,7 @@ void DX12ForgeEngine::CreateWindowAndDevice(HINSTANCE instance, int showCommand)
     RECT rectangle{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     AdjustWindowRect(&rectangle, windowStyle, FALSE);
     m_hwnd = CreateWindowExW(WS_EX_APPWINDOW, className,
-        L"DX12 Forge Engine",
+        L"Forge Engine",
         windowStyle, CW_USEDEFAULT, CW_USEDEFAULT,
         rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
         nullptr, nullptr, instance, nullptr);
@@ -510,7 +513,7 @@ void DX12ForgeEngine::CreateWindowAndDevice(HINSTANCE instance, int showCommand)
         ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "RegisterRawInputDevices");
 }
 
-void DX12ForgeEngine::CreateDeviceAndCommandObjects()
+void ForgeEngine::CreateDeviceAndCommandObjects()
 {
 #ifdef _DEBUG
     ComPtr<ID3D12Debug> debugController;
@@ -549,7 +552,7 @@ void DX12ForgeEngine::CreateDeviceAndCommandObjects()
         ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW para fence");
 }
 
-void DX12ForgeEngine::CreateSwapChain()
+void ForgeEngine::CreateSwapChain()
 {
     DXGI_SWAP_CHAIN_DESC1 description{};
     description.Width = m_width;
@@ -573,7 +576,7 @@ void DX12ForgeEngine::CreateSwapChain()
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
 
-void DX12ForgeEngine::CreateDescriptorHeaps()
+void ForgeEngine::CreateDescriptorHeaps()
 {
     D3D12_DESCRIPTOR_HEAP_DESC rtvDescription{};
     rtvDescription.NumDescriptors = FrameCount * 2; // back buffers + HDR scene targets; preview uses copy-only SRVs
@@ -598,7 +601,7 @@ void DX12ForgeEngine::CreateDescriptorHeaps()
     m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 }
 
-void DX12ForgeEngine::CreateSizeDependentResources()
+void ForgeEngine::CreateSizeDependentResources()
 {
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     for (UINT i = 0; i < FrameCount; ++i)
@@ -743,7 +746,7 @@ void DX12ForgeEngine::CreateSizeDependentResources()
     m_scissorRect = { 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
 }
 
-void DX12ForgeEngine::CreateShadowMap()
+void ForgeEngine::CreateShadowMap()
 {
     D3D12_RESOURCE_DESC shadowDescription{};
     shadowDescription.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -789,9 +792,9 @@ void DX12ForgeEngine::CreateShadowMap()
     m_shadowSrvGpuHandle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
 }
 
-void DX12ForgeEngine::CreateRootSignature()
+void ForgeEngine::CreateRootSignature()
 {
-    D3D12_DESCRIPTOR_RANGE ranges[7]{};
+    D3D12_DESCRIPTOR_RANGE ranges[8]{};
     ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     ranges[0].NumDescriptors = 1;
     ranges[0].BaseShaderRegister = 0;
@@ -812,7 +815,7 @@ void DX12ForgeEngine::CreateRootSignature()
     ranges[3].BaseShaderRegister = 3;
     ranges[3].RegisterSpace = 0;
     ranges[3].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-    for (UINT i = 4; i <= 6; ++i)
+    for (UINT i = 4; i <= 7; ++i)
     {
         ranges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
         ranges[i].NumDescriptors = 1;
@@ -821,7 +824,9 @@ void DX12ForgeEngine::CreateRootSignature()
         ranges[i].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
     }
 
-    D3D12_ROOT_PARAMETER parameters[9]{};
+    // Root parameters: 0=frame CBV, 1=object CBV, 2=shadow map, 3=post-process scene color,
+    // 4=albedo, 5=scene depth, 6=normal map, 7=metallic/roughness, 8=AO, 9=emissive.
+    D3D12_ROOT_PARAMETER parameters[10]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].Descriptor.RegisterSpace = 0;
@@ -846,11 +851,11 @@ void DX12ForgeEngine::CreateRootSignature()
     parameters[5].DescriptorTable.NumDescriptorRanges = 1;
     parameters[5].DescriptorTable.pDescriptorRanges = &ranges[3];
     parameters[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-    for (UINT i = 6; i <= 8; ++i)
+    for (UINT i = 6; i <= 9; ++i)
     {
         parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameters[i].DescriptorTable.NumDescriptorRanges = 1;
-        parameters[i].DescriptorTable.pDescriptorRanges = &ranges[i - 2]; // t4, t5, t6
+        parameters[i].DescriptorTable.pDescriptorRanges = &ranges[i - 2]; // t4, t5, t6, t7
         parameters[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
 
@@ -915,16 +920,34 @@ void DX12ForgeEngine::CreateRootSignature()
         IID_PPV_ARGS(&m_rootSignature)), "CreateRootSignature");
 }
 
-std::filesystem::path DX12ForgeEngine::GetShaderPath() const
+std::filesystem::path ForgeEngine::GetShaderPath() const
 {
     wchar_t executablePath[MAX_PATH]{};
     const DWORD length = GetModuleFileNameW(nullptr, executablePath, MAX_PATH);
     if (length == 0 || length >= MAX_PATH)
         throw std::runtime_error("Nao foi possivel localizar a pasta do executavel para carregar Shaders.hlsl.");
-    return std::filesystem::path(executablePath).parent_path() / L"Shaders.hlsl";
+    const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
+
+    // Exported games keep their shader inside the <Product>_Data folder; the editor
+    // and any legacy export keep it directly next to the executable.
+    std::error_code ec;
+    if (!m_gameProjectFolder.empty())
+    {
+        const auto dataShader = executableDirectory / m_gameProjectFolder / L"Shaders.hlsl";
+        if (std::filesystem::exists(dataShader, ec)) return dataShader;
+    }
+    for (std::filesystem::directory_iterator it(executableDirectory, ec), end; !ec && it != end; it.increment(ec))
+    {
+        std::error_code kindEc;
+        if (!it->is_directory(kindEc)) continue;
+        if (it->path().extension() != L"_Data") continue;
+        const auto candidate = it->path() / L"Shaders.hlsl";
+        if (std::filesystem::exists(candidate, ec)) return candidate;
+    }
+    return executableDirectory / L"Shaders.hlsl";
 }
 
-void DX12ForgeEngine::CreateShadersAndPipelines()
+void ForgeEngine::CreateShadersAndPipelines()
 {
     const auto shaderPath = GetShaderPath();
     if (!std::filesystem::exists(shaderPath))
@@ -991,6 +1014,13 @@ void DX12ForgeEngine::CreateShadersAndPipelines()
     pso.SampleDesc.Count = 1;
     pso.SampleDesc.Quality = 0;
     ThrowIfFailed(m_device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_pbrPipeline)), "Create PBR PSO");
+
+    // Double-sided variant for authored two-sided materials (foliage, cloth, flags).
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC doubleSidedPso = pso;
+    doubleSidedPso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    doubleSidedPso.RasterizerState.FrontCounterClockwise = FALSE;
+    ThrowIfFailed(m_device->CreateGraphicsPipelineState(&doubleSidedPso, IID_PPV_ARGS(&m_pbrDoubleSidedPipeline)),
+        "Create double-sided PBR PSO");
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowPso{};
     shadowPso.pRootSignature = m_rootSignature.Get();
@@ -1064,7 +1094,7 @@ void DX12ForgeEngine::CreateShadersAndPipelines()
     ThrowIfFailed(m_device->CreateGraphicsPipelineState(&postPso, IID_PPV_ARGS(&m_postProcessPipeline)), "Create post-process PSO");
 }
 
-void DX12ForgeEngine::CreateUploadResource(UINT64 size, ComPtr<ID3D12Resource>& resource)
+void ForgeEngine::CreateUploadResource(UINT64 size, ComPtr<ID3D12Resource>& resource)
 {
     const auto heap = HeapProperties(D3D12_HEAP_TYPE_UPLOAD);
     const auto description = BufferDescription(size);
@@ -1072,7 +1102,7 @@ void DX12ForgeEngine::CreateUploadResource(UINT64 size, ComPtr<ID3D12Resource>& 
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resource)), "Create upload buffer");
 }
 
-void DX12ForgeEngine::CreateMesh(Mesh& mesh, const std::vector<Vertex>& vertices,
+void ForgeEngine::CreateMesh(Mesh& mesh, const std::vector<Vertex>& vertices,
     const std::vector<std::uint32_t>& indices)
 {
     if (vertices.empty() || indices.empty())
@@ -1130,7 +1160,7 @@ void DX12ForgeEngine::CreateMesh(Mesh& mesh, const std::vector<Vertex>& vertices
     mesh.boundsRadius = (std::max)(0.001f, std::sqrt(radiusSquared));
 }
 
-void DX12ForgeEngine::CreateVertexOnlyMesh(Mesh& mesh, const std::vector<Vertex>& vertices)
+void ForgeEngine::CreateVertexOnlyMesh(Mesh& mesh, const std::vector<Vertex>& vertices)
 {
     if (vertices.empty())
         throw std::runtime_error("Tentativa de criar uma malha de linhas vazia.");
@@ -1150,7 +1180,7 @@ void DX12ForgeEngine::CreateVertexOnlyMesh(Mesh& mesh, const std::vector<Vertex>
     mesh.cpuIndices.clear();
 }
 
-void DX12ForgeEngine::CreateScene()
+void ForgeEngine::CreateScene()
 {
     std::vector<Vertex> cubeVertices;
     std::vector<std::uint32_t> cubeIndices;
@@ -1298,7 +1328,7 @@ void DX12ForgeEngine::CreateScene()
         { 0.72f, 0.28f, 0.82f, 1.0f }, 0.2f, 0.35f, 1.732f);
 }
 
-void DX12ForgeEngine::RebuildWorldTransform(GameObject& object)
+void ForgeEngine::RebuildWorldTransform(GameObject& object)
 {
     XMMATRIX world = XMMatrixScaling(object.scale.x, object.scale.y, object.scale.z) *
         XMMatrixRotationRollPitchYaw(object.rotation.x, object.rotation.y, object.rotation.z) *
@@ -1340,14 +1370,14 @@ void DX12ForgeEngine::RebuildWorldTransform(GameObject& object)
     }
 }
 
-int DX12ForgeEngine::IndexOfObject(const GameObject* object) const
+int ForgeEngine::IndexOfObject(const GameObject* object) const
 {
     for (int i = 0; i < static_cast<int>(m_objects.size()); ++i)
         if (&m_objects[static_cast<size_t>(i)] == object) return i;
     return -1;
 }
 
-XMFLOAT4X4 DX12ForgeEngine::GetAncestorWorld(const GameObject& object) const
+XMFLOAT4X4 ForgeEngine::GetAncestorWorld(const GameObject& object) const
 {
     if (object.parentIndex >= 0 && object.parentIndex < static_cast<int>(m_objects.size()))
         return m_objects[static_cast<size_t>(object.parentIndex)].world;
@@ -1356,7 +1386,7 @@ XMFLOAT4X4 DX12ForgeEngine::GetAncestorWorld(const GameObject& object) const
     return identity;
 }
 
-int DX12ForgeEngine::CloneObjectForScript(const GameObject& source, const std::string& newName)
+int ForgeEngine::CloneObjectForScript(const GameObject& source, const std::string& newName)
 {
     GameObject clone = source;
     clone.name = newName;
@@ -1376,7 +1406,7 @@ int DX12ForgeEngine::CloneObjectForScript(const GameObject& source, const std::s
     return index;
 }
 
-bool DX12ForgeEngine::DestroyObjectForScript(int id)
+bool ForgeEngine::DestroyObjectForScript(int id)
 {
     if (id < 0 || id >= static_cast<int>(m_objects.size())) return false;
     const int oldParent = m_objects[static_cast<size_t>(id)].parentIndex;
@@ -1392,7 +1422,7 @@ bool DX12ForgeEngine::DestroyObjectForScript(int id)
     return true;
 }
 
-void DX12ForgeEngine::CreateGizmoMeshes()
+void ForgeEngine::CreateGizmoMeshes()
 {
     const XMFLOAT3 axes[3] = { {1,0,0}, {0,1,0}, {0,0,1} };
     const XMFLOAT3 perpendicularA[3] = { {0,1,0}, {1,0,0}, {1,0,0} };
@@ -1457,7 +1487,7 @@ void DX12ForgeEngine::CreateGizmoMeshes()
     }
 }
 
-void DX12ForgeEngine::CreateColliderWireMeshes()
+void ForgeEngine::CreateColliderWireMeshes()
 {
     // Unit wireframes centered on the origin (-0.5..0.5). The per-object constant buffer
     // scales them by colliderSize and the object world matrix, so the marker grows with
@@ -1521,7 +1551,7 @@ void DX12ForgeEngine::CreateColliderWireMeshes()
     CreateVertexOnlyMesh(m_colliderWireMeshes[2], capsule);
 }
 
-void DX12ForgeEngine::CreateConstantBuffers()
+void ForgeEngine::CreateConstantBuffers()
 {
     for (UINT frame = 0; frame < FrameCount; ++frame)
     {
@@ -1539,7 +1569,7 @@ void DX12ForgeEngine::CreateConstantBuffers()
     }
 }
 
-void DX12ForgeEngine::CreateObjectConstantBuffers(GameObject& object)
+void ForgeEngine::CreateObjectConstantBuffers(GameObject& object)
 {
     for (UINT frame = 0; frame < FrameCount; ++frame)
     {
@@ -1549,7 +1579,7 @@ void DX12ForgeEngine::CreateObjectConstantBuffers(GameObject& object)
     }
 }
 
-void DX12ForgeEngine::CreateEditorWindow(HINSTANCE instance)
+void ForgeEngine::CreateEditorWindow(HINSTANCE instance)
 {
     m_editorBackgroundBrush = CreateSolidBrush(RGB(22, 26, 35));
     m_editorEditBrush = CreateSolidBrush(RGB(35, 41, 53));
@@ -1557,7 +1587,7 @@ void DX12ForgeEngine::CreateEditorWindow(HINSTANCE instance)
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
-    const wchar_t* className = L"DX12ForgeEditorPanelClass";
+    const wchar_t* className = L"ForgeEngineEditorPanelClass";
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
@@ -1577,7 +1607,7 @@ void DX12ForgeEngine::CreateEditorWindow(HINSTANCE instance)
     int y = std::max(20L, mainRect.top + 40L);
     const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     if (x + panelWidth > screenWidth) x = std::max(8L, mainRect.left + 70L);
-    m_editorHwnd = CreateWindowExW(WS_EX_TOOLWINDOW, className, L"DX12 Forge Editor - MOVE",
+    m_editorHwnd = CreateWindowExW(WS_EX_TOOLWINDOW, className, L"Forge Engine Editor - MOVE",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         x, y, panelWidth, panelHeight, nullptr, nullptr, instance, this);
     if (!m_editorHwnd)
@@ -1638,7 +1668,7 @@ void DX12ForgeEngine::CreateEditorWindow(HINSTANCE instance)
     UpdateEditorInspector();
 }
 
-void DX12ForgeEngine::UpdateEditorInspector()
+void ForgeEngine::UpdateEditorInspector()
 {
     if (m_editorHwnd && m_objectListHwnd)
     {
@@ -1685,7 +1715,7 @@ void DX12ForgeEngine::UpdateEditorInspector()
     }
 }
 
-bool DX12ForgeEngine::HandleEditorMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
+bool ForgeEngine::HandleEditorMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
 {
     switch (message)
     {
@@ -1770,13 +1800,13 @@ bool DX12ForgeEngine::HandleEditorMessage(HWND hwnd, UINT message, WPARAM wParam
     }
 }
 
-LRESULT CALLBACK DX12ForgeEngine::EditorWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK ForgeEngine::EditorWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    DX12ForgeEngine* engine = reinterpret_cast<DX12ForgeEngine*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    ForgeEngine* engine = reinterpret_cast<ForgeEngine*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE)
     {
         const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
-        engine = static_cast<DX12ForgeEngine*>(create->lpCreateParams);
+        engine = static_cast<ForgeEngine*>(create->lpCreateParams);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(engine));
     }
     if (engine)
@@ -1787,7 +1817,7 @@ LRESULT CALLBACK DX12ForgeEngine::EditorWindowProc(HWND hwnd, UINT message, WPAR
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-bool DX12ForgeEngine::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
+bool ForgeEngine::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result)
 {
     if (m_editorUI && hwnd == m_hwnd)
         m_editorUI->HandleWin32Message(hwnd, message, wParam, lParam);
@@ -1940,7 +1970,7 @@ bool DX12ForgeEngine::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPAR
     }
 }
 
-void DX12ForgeEngine::OnResize(UINT width, UINT height)
+void ForgeEngine::OnResize(UINT width, UINT height)
 {
     if (width == 0 || height == 0)
         return;
@@ -1949,7 +1979,7 @@ void DX12ForgeEngine::OnResize(UINT width, UINT height)
     m_resizePending = true;
 }
 
-void DX12ForgeEngine::ResizeIfNeeded()
+void ForgeEngine::ResizeIfNeeded()
 {
     if (!m_resizePending || m_minimized || !m_swapChain)
         return;
@@ -1969,7 +1999,7 @@ void DX12ForgeEngine::ResizeIfNeeded()
     m_resizePending = false;
 }
 
-void DX12ForgeEngine::UpdateCamera(float deltaSeconds)
+void ForgeEngine::UpdateCamera(float deltaSeconds)
 {
     GameObject* viewportCamera = nullptr;
     if (m_viewportCameraObjectIndex >= 0 && m_viewportCameraObjectIndex < static_cast<int>(m_objects.size()) &&
@@ -2065,7 +2095,7 @@ void DX12ForgeEngine::UpdateCamera(float deltaSeconds)
     XMStoreFloat4x4(&m_inverseViewProjection, inverseViewProjection);
 }
 
-bool DX12ForgeEngine::BuildMouseRay(int mouseX, int mouseY, XMFLOAT3& origin, XMFLOAT3& direction) const
+bool ForgeEngine::BuildMouseRay(int mouseX, int mouseY, XMFLOAT3& origin, XMFLOAT3& direction) const
 {
     const int sceneWidth = static_cast<int>(std::max(1.0f, m_sceneViewportWidth));
     const int sceneHeight = static_cast<int>(std::max(1.0f, m_sceneViewportHeight));
@@ -2090,7 +2120,7 @@ bool DX12ForgeEngine::BuildMouseRay(int mouseX, int mouseY, XMFLOAT3& origin, XM
     return true;
 }
 
-void DX12ForgeEngine::PickObject(int mouseX, int mouseY)
+void ForgeEngine::PickObject(int mouseX, int mouseY)
 {
     XMFLOAT3 rayOrigin{}, rayDirection{};
     if (!BuildMouseRay(mouseX, mouseY, rayOrigin, rayDirection))
@@ -2175,7 +2205,7 @@ void DX12ForgeEngine::PickObject(int mouseX, int mouseY)
     SelectSceneObject(closestObject);
 }
 
-void DX12ForgeEngine::SelectSceneObject(int index)
+void ForgeEngine::SelectSceneObject(int index)
 {
     if (index < -1 || index >= static_cast<int>(m_objects.size())) index = -1;
     const bool wasFollowingCamera = m_viewportCameraObjectIndex >= 0;
@@ -2202,20 +2232,20 @@ void DX12ForgeEngine::SelectSceneObject(int index)
     UpdateEditorInspector();
 }
 
-void DX12ForgeEngine::SetGizmoMode(TransformMode mode)
+void ForgeEngine::SetGizmoMode(TransformMode mode)
 {
     m_gizmoMode = mode;
     if (m_editorHwnd)
     {
         const wchar_t* modeName = mode == TransformMode::Translate ? L"MOVE" :
             (mode == TransformMode::Rotate ? L"ROTATE" : L"SCALE");
-        std::wstring title = L"DX12 Forge Editor - ";
+        std::wstring title = L"Forge Engine Editor - ";
         title += modeName;
         SetWindowTextW(m_editorHwnd, title.c_str());
     }
 }
 
-void DX12ForgeEngine::SetCursorHidden(bool hidden)
+void ForgeEngine::SetCursorHidden(bool hidden)
 {
     if (hidden == m_cursorHidden) return;
     if (hidden)
@@ -2240,7 +2270,7 @@ void DX12ForgeEngine::SetCursorHidden(bool hidden)
     }
 }
 
-float DX12ForgeEngine::GetGizmoLength() const
+float ForgeEngine::GetGizmoLength() const
 {
     if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_objects.size())) return 1.5f;
     const XMFLOAT3& p = m_objects[static_cast<size_t>(m_selectedObject)].position;
@@ -2251,7 +2281,7 @@ float DX12ForgeEngine::GetGizmoLength() const
     return std::clamp(distance * 0.12f, 1.2f, 5.0f);
 }
 
-float DX12ForgeEngine::RayAxisParameter(const XMFLOAT3& rayOrigin, const XMFLOAT3& rayDirection,
+float ForgeEngine::RayAxisParameter(const XMFLOAT3& rayOrigin, const XMFLOAT3& rayDirection,
     const XMFLOAT3& axisOrigin, const XMFLOAT3& axisDirection, float segmentLength, float& separation) const
 {
     const XMFLOAT3 w{ rayOrigin.x-axisOrigin.x, rayOrigin.y-axisOrigin.y, rayOrigin.z-axisOrigin.z };
@@ -2278,7 +2308,7 @@ float DX12ForgeEngine::RayAxisParameter(const XMFLOAT3& rayOrigin, const XMFLOAT
     return axisT;
 }
 
-bool DX12ForgeEngine::IntersectGizmoRing(int axis, const XMFLOAT3& rayOrigin, const XMFLOAT3& rayDirection,
+bool ForgeEngine::IntersectGizmoRing(int axis, const XMFLOAT3& rayOrigin, const XMFLOAT3& rayDirection,
     XMFLOAT3& radial, float& angle) const
 {
     if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_objects.size()) || axis < 0 || axis > 2)
@@ -2298,7 +2328,7 @@ bool DX12ForgeEngine::IntersectGizmoRing(int axis, const XMFLOAT3& rayOrigin, co
     return true;
 }
 
-bool DX12ForgeEngine::TryBeginGizmoDrag(int mouseX, int mouseY, HWND hwnd)
+bool ForgeEngine::TryBeginGizmoDrag(int mouseX, int mouseY, HWND hwnd)
 {
     if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_objects.size())) return false;
     XMFLOAT3 rayOrigin{}, rayDirection{};
@@ -2366,7 +2396,7 @@ bool DX12ForgeEngine::TryBeginGizmoDrag(int mouseX, int mouseY, HWND hwnd)
     return true;
 }
 
-void DX12ForgeEngine::UpdateGizmoDrag(int mouseX, int mouseY)
+void ForgeEngine::UpdateGizmoDrag(int mouseX, int mouseY)
 {
     if (!m_gizmoDragging || m_gizmoAxis < 0 || m_selectedObject < 0 ||
         m_selectedObject >= static_cast<int>(m_objects.size())) return;
@@ -2414,7 +2444,7 @@ void DX12ForgeEngine::UpdateGizmoDrag(int mouseX, int mouseY)
     UpdateEditorInspector();
 }
 
-void DX12ForgeEngine::ProcessPendingSelection()
+void ForgeEngine::ProcessPendingSelection()
 {
     if (!m_clickPending)
         return;
@@ -2422,7 +2452,7 @@ void DX12ForgeEngine::ProcessPendingSelection()
     m_clickPending = false;
 }
 
-void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
+void ForgeEngine::UpdateConstantBuffers(float totalSeconds)
 {
     const XMVECTOR cameraPos = XMLoadFloat3(&m_cameraPosition);
     const auto safeNormalize = [](const XMFLOAT3& value, const XMFLOAT3& fallback)
@@ -2596,7 +2626,7 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
         D3D12_RANGE readRange{ 0, 0 };
         HRESULT hr = resource->Map(0, &readRange, &mapped);
         if (FAILED(hr))
-            DX12ForgeEngine::ThrowIfFailed(hr, "Map constant buffer");
+            ForgeEngine::ThrowIfFailed(hr, "Map constant buffer");
         std::memcpy(mapped, data, size);
         D3D12_RANGE writtenRange{ 0, size };
         resource->Unmap(0, &writtenRange);
@@ -2619,7 +2649,12 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
         constants.uvTransform = { object.textureTiling.x, object.textureTiling.y,
             object.textureOffset.x, object.textureOffset.y };
         constants.materialMaps = { object.normalTexture ? 1.0f : 0.0f,
-            object.metallicRoughnessTexture ? 1.0f : 0.0f, object.aoTexture ? 1.0f : 0.0f, 1.0f };
+            object.metallicRoughnessTexture ? 1.0f : 0.0f, object.aoTexture ? 1.0f : 0.0f,
+            std::max(object.normalMapScale, 0.0f) };
+        constants.emissive = { object.emissiveColor.x, object.emissiveColor.y, object.emissiveColor.z,
+            object.isDragPreviewEmissive ? 1.35f : std::max(object.emissiveIntensity, 0.0f) };
+        constants.materialFlags = { object.emissiveTexture ? 1.0f : 0.0f,
+            std::clamp(object.occlusionStrength, 0.0f, 1.0f), 0.0f, 0.0f };
         upload(object.objectConstants[m_frameIndex].Get(), &constants, sizeof(constants));
 
         ObjectConstants outline = constants;
@@ -2673,7 +2708,7 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
     }
 }
 
-void DX12ForgeEngine::DrawMesh(const Mesh& mesh)
+void ForgeEngine::DrawMesh(const Mesh& mesh)
 {
     m_commandList->IASetVertexBuffers(0, 1, &mesh.vertexView);
     if (mesh.indexCount > 0)
@@ -2687,7 +2722,7 @@ void DX12ForgeEngine::DrawMesh(const Mesh& mesh)
     }
 }
 
-void DX12ForgeEngine::DrawShadowPass(UINT frameIndex)
+void ForgeEngine::DrawShadowPass(UINT frameIndex)
 {
     D3D12_RESOURCE_BARRIER toDepth = TransitionBarrier(m_shadowMap.Get(),
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
@@ -2716,7 +2751,7 @@ void DX12ForgeEngine::DrawShadowPass(UINT frameIndex)
     m_commandList->ResourceBarrier(1, &toShader);
 }
 
-void DX12ForgeEngine::DrawAxes(UINT frameIndex)
+void ForgeEngine::DrawAxes(UINT frameIndex)
 {
     m_commandList->SetPipelineState(m_axisPipeline.Get());
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
@@ -2730,7 +2765,7 @@ void DX12ForgeEngine::DrawAxes(UINT frameIndex)
     }
 }
 
-void DX12ForgeEngine::DrawGizmo(UINT frameIndex)
+void ForgeEngine::DrawGizmo(UINT frameIndex)
 {
     if (m_selectedObject < 0 || m_selectedObject >= static_cast<int>(m_objects.size())) return;
     m_commandList->SetPipelineState(m_gizmoPipeline.Get());
@@ -2749,7 +2784,7 @@ void DX12ForgeEngine::DrawGizmo(UINT frameIndex)
     }
 }
 
-void DX12ForgeEngine::DrawColliderOverlay(UINT frameIndex)
+void ForgeEngine::DrawColliderOverlay(UINT frameIndex)
 {
     m_commandList->SetPipelineState(m_gizmoPipeline.Get());
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
@@ -2764,7 +2799,7 @@ void DX12ForgeEngine::DrawColliderOverlay(UINT frameIndex)
     }
 }
 
-void DX12ForgeEngine::DrawObjects(UINT frameIndex)
+void ForgeEngine::DrawObjects(UINT frameIndex)
 {
     m_commandList->SetPipelineState(m_pbrPipeline.Get());
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2774,6 +2809,16 @@ void DX12ForgeEngine::DrawObjects(UINT frameIndex)
         if (!object.meshRendererEnabled || object.mesh == nullptr) continue;
         // Do not draw the active camera's icon at the camera origin into its own view.
         if (object.isCamera && static_cast<int>(i) == m_viewportCameraObjectIndex) continue;
+
+        // Unity-style culling mask: when a scene camera drives the viewport, objects
+        // whose layer bit is cleared on that camera are skipped.
+        if (m_viewportCameraObjectIndex >= 0 &&
+            m_viewportCameraObjectIndex < static_cast<int>(m_objects.size()))
+        {
+            const GameObject& viewportCamera = m_objects[static_cast<size_t>(m_viewportCameraObjectIndex)];
+            const int layerBit = object.layer & 31;
+            if ((viewportCamera.cameraCullingMask & (1 << layerBit)) == 0) continue;
+        }
 
         // Conservative view-space sphere culling. The old test compared projected Z
         // values to world-space radii, so it could discard visible objects. Selected
@@ -2804,6 +2849,9 @@ void DX12ForgeEngine::DrawObjects(UINT frameIndex)
             if (outsideDepth || outsideHorizontal || outsideVertical) continue;
         }
 
+        // Authored two-sided materials render without back-face culling so single-plane
+        // geometry (foliage cards, cloth) is visible from both sides.
+        m_commandList->SetPipelineState(object.doubleSided ? m_pbrDoubleSidedPipeline.Get() : m_pbrPipeline.Get());
         m_commandList->SetGraphicsRootConstantBufferView(1, object.objectConstants[frameIndex]->GetGPUVirtualAddress());
         D3D12_GPU_DESCRIPTOR_HANDLE albedoHandle = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
         albedoHandle.ptr += static_cast<UINT64>(object.albedoTexture ? object.albedoSrvIndex : (m_frameIndex == 0 ? 2u : 1u)) * m_srvDescriptorSize;
@@ -2818,6 +2866,7 @@ void DX12ForgeEngine::DrawObjects(UINT frameIndex)
         m_commandList->SetGraphicsRootDescriptorTable(6, textureHandle(object.normalTexture ? object.normalSrvIndex : fallbackMaterialSrv));
         m_commandList->SetGraphicsRootDescriptorTable(7, textureHandle(object.metallicRoughnessTexture ? object.metallicRoughnessSrvIndex : fallbackMaterialSrv));
         m_commandList->SetGraphicsRootDescriptorTable(8, textureHandle(object.aoTexture ? object.aoSrvIndex : fallbackMaterialSrv));
+        m_commandList->SetGraphicsRootDescriptorTable(9, textureHandle(object.emissiveTexture ? object.emissiveSrvIndex : fallbackMaterialSrv));
         DrawMesh(*object.mesh);
 
         if (static_cast<int>(i) == m_selectedObject)
@@ -2830,7 +2879,7 @@ void DX12ForgeEngine::DrawObjects(UINT frameIndex)
     }
 }
 
-void DX12ForgeEngine::DrawScenePass(UINT frameIndex)
+void ForgeEngine::DrawScenePass(UINT frameIndex)
 {
     D3D12_RESOURCE_BARRIER toRenderTarget = TransitionBarrier(m_hdrTargets[frameIndex].Get(),
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -2882,7 +2931,7 @@ void DX12ForgeEngine::DrawScenePass(UINT frameIndex)
     m_commandList->ResourceBarrier(1, &toShader);
 }
 
-void DX12ForgeEngine::DrawPostProcessPass(UINT frameIndex)
+void ForgeEngine::DrawPostProcessPass(UINT frameIndex)
 {
     D3D12_RESOURCE_BARRIER depthToShader = TransitionBarrier(m_depthBuffer.Get(),
         D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -2918,7 +2967,7 @@ void DX12ForgeEngine::DrawPostProcessPass(UINT frameIndex)
     m_commandList->ResourceBarrier(1, &toPresent);
 }
 
-void DX12ForgeEngine::CaptureCameraPreviewFrame(UINT frameIndex)
+void ForgeEngine::CaptureCameraPreviewFrame(UINT frameIndex)
 {
     if (frameIndex >= FrameCount || !m_cameraPreviewTargets[frameIndex] || !m_renderTargets[frameIndex])
         return;
@@ -2938,20 +2987,24 @@ void DX12ForgeEngine::CaptureCameraPreviewFrame(UINT frameIndex)
     m_commandList->ResourceBarrier(2, toShader);
 }
 
-void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
+void ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
 {
     std::string& texturePath = slot == 0 ? object.albedoTexturePath :
         slot == 1 ? object.normalTexturePath :
-        slot == 2 ? object.metallicRoughnessTexturePath : object.aoTexturePath;
+        slot == 2 ? object.metallicRoughnessTexturePath :
+        slot == 3 ? object.aoTexturePath : object.emissiveTexturePath;
     std::string& loadedTexturePath = slot == 0 ? object.loadedAlbedoTexturePath :
         slot == 1 ? object.loadedNormalTexturePath :
-        slot == 2 ? object.loadedMetallicRoughnessTexturePath : object.loadedAoTexturePath;
+        slot == 2 ? object.loadedMetallicRoughnessTexturePath :
+        slot == 3 ? object.loadedAoTexturePath : object.loadedEmissiveTexturePath;
     ComPtr<ID3D12Resource>& texture = slot == 0 ? object.albedoTexture :
         slot == 1 ? object.normalTexture :
-        slot == 2 ? object.metallicRoughnessTexture : object.aoTexture;
+        slot == 2 ? object.metallicRoughnessTexture :
+        slot == 3 ? object.aoTexture : object.emissiveTexture;
     UINT& srvIndex = slot == 0 ? object.albedoSrvIndex :
         slot == 1 ? object.normalSrvIndex :
-        slot == 2 ? object.metallicRoughnessSrvIndex : object.aoSrvIndex;
+        slot == 2 ? object.metallicRoughnessSrvIndex :
+        slot == 3 ? object.aoSrvIndex : object.emissiveSrvIndex;
     if (texturePath == loadedTexturePath) return;
 
     m_lastTextureError.clear();
@@ -2966,7 +3019,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
 
     if (m_nextTextureSrvIndex >= 1024) {
     m_lastTextureError = "Texture descriptor capacity exhausted (1024 entries).";
-    OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+    OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
     return;
     }
 
@@ -3018,7 +3071,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
         if (!found)
         {
             m_lastTextureError = "Texture file not found. Check Project/Assets path: " + texturePath;
-            OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+            OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
             return;
         }
     }
@@ -3028,7 +3081,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
         IID_PPV_ARGS(&factory));
     if (FAILED(hr)) {
         m_lastTextureError = "Windows Imaging Component (WIC) could not start for: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
@@ -3036,13 +3089,13 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
         WICDecodeMetadataCacheOnLoad, &decoder);
     if (FAILED(hr)) {
         m_lastTextureError = "WIC could not decode texture: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
     if (FAILED(decoder->GetFrame(0, &frame))) {
         m_lastTextureError = "Could not read the first image frame: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     UINT width = 0, height = 0;
@@ -3050,19 +3103,19 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
         width > 16384 || height > 16384)
     {
         m_lastTextureError = "Texture dimensions are invalid or exceed 16384 x 16384: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
     if (FAILED(factory->CreateFormatConverter(&converter))) {
         m_lastTextureError = "Could not create a WIC pixel converter for: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     if (FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA,
         WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
         m_lastTextureError = "Texture pixel format could not be converted to RGBA: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     const UINT rowPitch = width * 4;
@@ -3070,7 +3123,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
     std::vector<std::uint8_t> pixels(imageBytes);
     if (FAILED(converter->CopyPixels(nullptr, rowPitch, imageBytes, pixels.data()))) {
         m_lastTextureError = "Could not read texture pixels: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
 
@@ -3089,7 +3142,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
     if (FAILED(hr)) {
         texture.Reset();
         m_lastTextureError = "DirectX 12 could not allocate texture memory: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
 
@@ -3105,7 +3158,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
     if (FAILED(hr)) {
         texture.Reset();
         m_lastTextureError = "DirectX 12 could not allocate texture upload memory: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     std::uint8_t* mapped = nullptr;
@@ -3113,7 +3166,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
     if (FAILED(upload->Map(0, &readRange, reinterpret_cast<void**>(&mapped))) || mapped == nullptr) {
         texture.Reset();
         m_lastTextureError = "Could not map texture upload memory: " + path.string();
-        OutputDebugStringA(("DX12ForgeEngine: " + m_lastTextureError + "\n").c_str());
+        OutputDebugStringA(("ForgeEngine: " + m_lastTextureError + "\n").c_str());
         return;
     }
     for (UINT y = 0; y < height; ++y)
@@ -3147,7 +3200,7 @@ void DX12ForgeEngine::EnsureObjectTexture(GameObject& object, int slot)
     loadedTexturePath = texturePath;
 }
 
-void DX12ForgeEngine::Render(float deltaSeconds)
+void ForgeEngine::Render(float deltaSeconds)
 {
     if (!m_initialized || m_minimized)
         return;
@@ -3190,7 +3243,14 @@ void DX12ForgeEngine::Render(float deltaSeconds)
 
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset(), "CommandAllocator::Reset");
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr), "CommandList::Reset");
-    for (GameObject& object : m_objects) { EnsureObjectTexture(object, 0); EnsureObjectTexture(object, 1); EnsureObjectTexture(object, 2); EnsureObjectTexture(object, 3); }
+    for (GameObject& object : m_objects)
+    {
+        EnsureObjectTexture(object, 0);
+        EnsureObjectTexture(object, 1);
+        EnsureObjectTexture(object, 2);
+        EnsureObjectTexture(object, 3);
+        EnsureObjectTexture(object, 4);
+    }
     UpdateConstantBuffers(totalSeconds);
     DrawShadowPass(m_frameIndex);
     DrawScenePass(m_frameIndex);
@@ -3266,14 +3326,14 @@ void DX12ForgeEngine::Render(float deltaSeconds)
     UpdateWindowTitle(deltaSeconds);
 }
 
-void DX12ForgeEngine::RequestScreenshot(const std::filesystem::path& path)
+void ForgeEngine::RequestScreenshot(const std::filesystem::path& path)
 {
     if (m_screenshotPending) return;
     m_screenshotPath = path;
     m_screenshotPending = true;
 }
 
-void DX12ForgeEngine::EncodePendingScreenshot(UINT64 fenceValue)
+void ForgeEngine::EncodePendingScreenshot(UINT64 fenceValue)
 {
     // Wait until this frame's GPU work (including the back buffer copy) has finished.
     if (m_fence->GetCompletedValue() < fenceValue)
@@ -3347,7 +3407,7 @@ void DX12ForgeEngine::EncodePendingScreenshot(UINT64 fenceValue)
         : "ERROR: Could not write the screenshot PNG: " + m_screenshotPath.string();
 }
 
-void DX12ForgeEngine::WaitForFrame(UINT frameIndex)
+void ForgeEngine::WaitForFrame(UINT frameIndex)
 {
     const UINT64 fenceValue = m_frameFenceValues[frameIndex];
     if (fenceValue != 0 && m_fence->GetCompletedValue() < fenceValue)
@@ -3357,7 +3417,7 @@ void DX12ForgeEngine::WaitForFrame(UINT frameIndex)
     }
 }
 
-void DX12ForgeEngine::WaitForGpu()
+void ForgeEngine::WaitForGpu()
 {
     if (!m_commandQueue || !m_fence)
         return;
@@ -3371,7 +3431,7 @@ void DX12ForgeEngine::WaitForGpu()
     m_frameFenceValues.fill(0);
 }
 
-void DX12ForgeEngine::UpdateWindowTitle(float deltaSeconds)
+void ForgeEngine::UpdateWindowTitle(float deltaSeconds)
 {
     m_titleTimer += deltaSeconds;
     if (m_titleTimer < 0.25f)
@@ -3379,14 +3439,14 @@ void DX12ForgeEngine::UpdateWindowTitle(float deltaSeconds)
     m_titleTimer = 0.0f;
     if (m_standalonePlayer)
     {
-        std::wstring title = m_gameTitle.empty() ? std::wstring(L"DX12 Forge Game") : m_gameTitle;
+        std::wstring title = m_gameTitle.empty() ? std::wstring(L"Forge Engine Game") : m_gameTitle;
         if (!m_gameCreator.empty()) title += L" | " + m_gameCreator;
         SetWindowTextW(m_hwnd, title.c_str());
         return;
     }
     const wchar_t* modeName = m_gizmoMode == TransformMode::Translate ? L"Move" :
         (m_gizmoMode == TransformMode::Rotate ? L"Rotate" : L"Scale");
-    std::wstring title = L"DX12 Forge Engine | RMB Look | WASD/QE Move | LMB Select/Gizmo | 1 Move 2 Rotate 3 Scale | ";
+    std::wstring title = L"Forge Engine | RMB Look | WASD/QE Move | LMB Select/Gizmo | 1 Move 2 Rotate 3 Scale | ";
     title += modeName;
     if (m_selectedObject >= 0 && static_cast<size_t>(m_selectedObject) < m_objects.size())
     {
@@ -3397,7 +3457,7 @@ void DX12ForgeEngine::UpdateWindowTitle(float deltaSeconds)
     SetWindowTextW(m_hwnd, title.c_str());
 }
 
-int DX12ForgeEngine::Run()
+int ForgeEngine::Run()
 {
     MSG message{};
     auto previousTime = std::chrono::steady_clock::now();

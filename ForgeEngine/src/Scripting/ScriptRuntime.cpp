@@ -133,7 +133,7 @@ bool ForgeScriptRuntime::RunDotnetBuild(const std::filesystem::path& dotnetPath,
 
 bool ForgeScriptRuntime::Build(const std::filesystem::path& sourceRoot,const std::filesystem::path& projectRoot,std::vector<std::string>& logs)
 {
-    const auto dotnet=FindDotnet();if(dotnet.empty()){logs.push_back("ERROR: .NET SDK not found. Install the .NET 8 SDK and restart DX12 Forge.");return false;}
+    const auto dotnet=FindDotnet();if(dotnet.empty()){logs.push_back("ERROR: .NET SDK not found. Install the .NET 8 SDK and restart Forge Engine.");return false;}
     const auto scriptsProject=projectRoot/L"Scripts"/L"ForgeGameScripts.csproj";
     const auto hostProject=sourceRoot/L"Scripting"/L"ForgeScriptHost"/L"ForgeScriptHost.csproj";
     if(!std::filesystem::exists(scriptsProject)){logs.push_back("ERROR: C# scripts project missing: "+scriptsProject.string());return false;}
@@ -259,7 +259,14 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
         <<o.lightColor.z<<'|'<<o.lightIntensity<<'|'<<o.lightRange<<'|'<<o.lightInnerAngle<<'|'<<o.lightOuterAngle<<'|'
         <<(o.hasCollider?1:0)<<'|'<<(o.hasAudioSource?1:0)<<'|'<<(o.hasCamera?1:0)<<'|'
         <<Base64Encode(o.tag)<<'|'<<o.layer<<'|'<<o.colliderType<<'|'<<o.colliderSize.x<<'|'<<o.colliderSize.y<<'|'<<o.colliderSize.z<<'|'
-        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'\n';
+        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'|'
+         <<o.baseColor.x<<'|'<<o.baseColor.y<<'|'<<o.baseColor.z<<'|'<<o.metallic<<'|'<<o.roughness<<'|'
+         <<o.emissiveColor.x<<'|'<<o.emissiveColor.y<<'|'<<o.emissiveColor.z<<'|'<<o.emissiveIntensity<<'|'
+         <<o.normalMapScale<<'|'<<(o.doubleSided?1:0)<<'|'
+         <<o.cameraFieldOfView<<'|'<<o.cameraNearClip<<'|'<<o.cameraFarClip<<'|'<<(o.cameraOrthographic?1:0)<<'|'
+         <<o.cameraOrthographicSize<<'|'<<o.cameraDepth<<'|'
+         <<o.cameraBackgroundColor.x<<'|'<<o.cameraBackgroundColor.y<<'|'<<o.cameraBackgroundColor.z<<'|'<<o.cameraBackgroundColor.w<<'|'
+         <<(o.cameraDrawSkybox?1:0)<<'|'<<(o.cameraDrawGizmos?1:0)<<'|'<<o.cameraCullingMask<<'\n';
         for(const auto& s:o.scripts)out<<"SCRIPT|"<<o.id<<'|'<<s.className<<'|'<<(s.enabled?1:0)<<'\n';}
     out<<"END\n";if(!SendText(out.str())){logs.push_back("ERROR: Lost connection to the C# script host.");Stop();return false;}
     bool gotEnd=false;const ULONGLONG deadline=GetTickCount64()+3000;std::map<int,ForgeScriptObjectState*> byId;for(auto& o:objects)byId[o.id]=&o;
@@ -299,6 +306,28 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
             if(p.size()>=31){o.colliderType=ToInt(p[22],o.colliderType);o.colliderSize={ToFloat(p[23],o.colliderSize.x),ToFloat(p[24],o.colliderSize.y),ToFloat(p[25],o.colliderSize.z)};
                 o.isTrigger=ToInt(p[26],o.isTrigger?1:0)!=0;o.hasRigidbody=ToInt(p[27],o.hasRigidbody?1:0)!=0;o.mass=ToFloat(p[28],o.mass);
                 o.useGravity=ToInt(p[29],o.useGravity?1:0)!=0;o.isKinematic=ToInt(p[30],o.isKinematic?1:0)!=0;}
+            if(p.size()>=42){
+                o.baseColor={ToFloat(p[31],o.baseColor.x),ToFloat(p[32],o.baseColor.y),ToFloat(p[33],o.baseColor.z)};
+                o.metallic=std::clamp(ToFloat(p[34],o.metallic),0.0f,1.0f);
+                o.roughness=std::clamp(ToFloat(p[35],o.roughness),0.045f,1.0f);
+                o.emissiveColor={ToFloat(p[36],o.emissiveColor.x),ToFloat(p[37],o.emissiveColor.y),ToFloat(p[38],o.emissiveColor.z)};
+                o.emissiveIntensity=std::clamp(ToFloat(p[39],o.emissiveIntensity),0.0f,64.0f);
+                o.normalMapScale=std::clamp(ToFloat(p[40],o.normalMapScale),0.0f,8.0f);
+                o.doubleSided=ToInt(p[41],o.doubleSided?1:0)!=0;
+            }
+            if(p.size()>=55){
+                // SET omits HasMeshRenderer, so every field sits 6 tokens earlier than in OBJ.
+                o.cameraFieldOfView=ToFloat(p[42],o.cameraFieldOfView);
+                o.cameraNearClip=ToFloat(p[43],o.cameraNearClip);
+                o.cameraFarClip=ToFloat(p[44],o.cameraFarClip);
+                o.cameraOrthographic=ToInt(p[45],o.cameraOrthographic?1:0)!=0;
+                o.cameraOrthographicSize=ToFloat(p[46],o.cameraOrthographicSize);
+                o.cameraDepth=ToInt(p[47],o.cameraDepth);
+                o.cameraBackgroundColor={ToFloat(p[48],o.cameraBackgroundColor.x),ToFloat(p[49],o.cameraBackgroundColor.y),ToFloat(p[50],o.cameraBackgroundColor.z),ToFloat(p[51],o.cameraBackgroundColor.w)};
+                o.cameraDrawSkybox=ToInt(p[52],o.cameraDrawSkybox?1:0)!=0;
+                o.cameraDrawGizmos=ToInt(p[53],o.cameraDrawGizmos?1:0)!=0;
+                o.cameraCullingMask=ToInt(p[54],o.cameraCullingMask);
+            }
         }else AppendHostLog(line,logs);
     }
     if(!gotEnd){logs.push_back("ERROR: C# host did not answer in 3 seconds. A script may be stuck in an infinite loop; the isolated host is stopping.");Stop();return false;}return true;

@@ -24,14 +24,14 @@ using DirectX::XMFLOAT3;
 using DirectX::XMFLOAT4;
 using DirectX::XMFLOAT4X4;
 
-class DX12ForgeEditorUI;
+class ForgeEditorUI;
 
-class DX12ForgeEngine final
+class ForgeEngine final
 {
-    friend class DX12ForgeEditorUI;
+    friend class ForgeEditorUI;
 public:
-    DX12ForgeEngine();
-    ~DX12ForgeEngine();
+    ForgeEngine();
+    ~ForgeEngine();
 
     bool Initialize(HINSTANCE instance, int showCommand);
     int Run();
@@ -102,6 +102,8 @@ private:
         XMFLOAT4 material; // x = metallic, y = roughness, z = has albedo texture, w = light/drag-preview emissive mode
         XMFLOAT4 uvTransform; // xy = tiling, zw = offset
         XMFLOAT4 materialMaps; // x = normal map, y = metallic/roughness map, z = AO map, w = normal scale
+        XMFLOAT4 emissive;    // rgb = emission tint, w = emission intensity
+        XMFLOAT4 materialFlags; // x = emissive map, y = occlusion strength, zw reserved
     };
 
     struct VertexRange
@@ -131,10 +133,16 @@ private:
         XMFLOAT4 baseColor{ 0.7f, 0.7f, 0.7f, 1.0f };
         float metallic = 0.0f;
         float roughness = 0.6f;
+        XMFLOAT3 emissiveColor{ 0.0f, 0.0f, 0.0f };
+        float emissiveIntensity = 0.0f;
+        float normalMapScale = 1.0f;
+        float occlusionStrength = 1.0f;
+        bool doubleSided = false;
         float localBoundsRadius = 1.7320508f;
         XMFLOAT2 textureTiling{ 1.0f, 1.0f };
         XMFLOAT2 textureOffset{ 0.0f, 0.0f };
         bool meshRendererEnabled = true;
+        bool hasMaterial = true; // when false the Material/PBR inspector section is hidden
         bool isDragPreview = false; // temporary object shown while dragging an asset over the Scene
         bool isDragPreviewEmissive = false; // model preview remains legible against dark or bright sky
         bool isTerrain = false;
@@ -147,6 +155,13 @@ private:
         float cameraFieldOfView = 60.0f;
         float cameraNearClip = 0.05f;
         float cameraFarClip = 1000.0f;
+        bool cameraOrthographic = false;
+        float cameraOrthographicSize = 5.0f;
+        int cameraDepth = 0;
+        XMFLOAT4 cameraBackgroundColor{ 0.02f, 0.03f, 0.05f, 1.0f };
+        bool cameraDrawSkybox = true;
+        bool cameraDrawGizmos = true;
+        int cameraCullingMask = 0x7FFFFFFF; // bit per layer; matches Unity's Everything default
         std::vector<Vertex> terrainVertices;
         std::vector<std::uint32_t> terrainIndices;
         LightType lightType = LightType::None;
@@ -173,18 +188,22 @@ private:
         std::string normalTexturePath;
         std::string metallicRoughnessTexturePath;
         std::string aoTexturePath;
+        std::string emissiveTexturePath;
         std::string loadedAlbedoTexturePath;
         std::string loadedNormalTexturePath;
         std::string loadedMetallicRoughnessTexturePath;
         std::string loadedAoTexturePath;
+        std::string loadedEmissiveTexturePath;
         Microsoft::WRL::ComPtr<ID3D12Resource> albedoTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> normalTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> metallicRoughnessTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> aoTexture;
+        Microsoft::WRL::ComPtr<ID3D12Resource> emissiveTexture;
         UINT albedoSrvIndex = 1; // HDR SRV is a valid fallback when no albedo map is assigned.
         UINT normalSrvIndex = 1;
         UINT metallicRoughnessSrvIndex = 1;
         UINT aoSrvIndex = 1;
+        UINT emissiveSrvIndex = 1;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> objectConstants;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> outlineConstants;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> colliderConstants;
@@ -267,7 +286,7 @@ private:
 
 private:
     HINSTANCE m_instance = nullptr;
-    std::unique_ptr<DX12ForgeEditorUI> m_editorUI;
+    std::unique_ptr<ForgeEditorUI> m_editorUI;
     HWND m_hwnd = nullptr;
     HWND m_splashHwnd = nullptr;
     std::wstring m_splashMessage = L"Initializing DirectX 12...";
@@ -351,6 +370,9 @@ private:
     std::wstring m_gameTitle;
     std::wstring m_gameIconPath;
     std::wstring m_gameCreator;
+    // Folder (relative to the executable) that stores the exported game's data,
+    // mirroring Unity's "<Product>_Data" layout.
+    std::wstring m_gameProjectFolder;
     float m_sceneViewportX = 0.0f;
     float m_sceneViewportY = 0.0f;
     float m_sceneViewportWidth = 1440.0f;
@@ -392,6 +414,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pbrPipeline;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pbrDoubleSidedPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_shadowPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_skyGridPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_outlinePipeline;

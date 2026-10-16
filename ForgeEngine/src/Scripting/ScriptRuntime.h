@@ -30,6 +30,26 @@ struct ForgeScriptObjectState
     float mass = 1.0f;
     bool useGravity = true;
     bool isKinematic = false;
+    // Material / PBR values mirrored to managed scripts.
+    ForgeScriptVec3 baseColor{1.0f,1.0f,1.0f};
+    float metallic = 0.0f;
+    float roughness = 0.6f;
+    ForgeScriptVec3 emissiveColor{0.0f,0.0f,0.0f};
+    float emissiveIntensity = 0.0f;
+    float normalMapScale = 1.0f;
+    bool doubleSided = false;
+    // Camera values mirrored to managed scripts.
+    float cameraFieldOfView = 60.0f;
+    float cameraNearClip = 0.05f;
+    float cameraFarClip = 1000.0f;
+    bool cameraOrthographic = false;
+    float cameraOrthographicSize = 5.0f;
+    int cameraDepth = 0;
+    struct Vec4 { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; };
+    Vec4 cameraBackgroundColor{0.02f, 0.03f, 0.05f, 1.0f};
+    bool cameraDrawSkybox = true;
+    bool cameraDrawGizmos = true;
+    int cameraCullingMask = 0x7FFFFFFF;
     std::vector<ForgeScriptAttachment> scripts;
 };
 struct ForgeScriptCommand

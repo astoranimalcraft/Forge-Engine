@@ -343,6 +343,24 @@ public sealed class RuntimeObjectData
     public float Mass { get; set; } = 1f;
     public bool UseGravity { get; set; } = true;
     public bool IsKinematic { get; set; }
+    public bool HasMaterial { get; set; } = true;
+    public Vector3 BaseColor { get; set; } = Vector3.one;
+    public float Metallic { get; set; }
+    public float Roughness { get; set; } = 0.6f;
+    public Vector3 EmissiveColor { get; set; }
+    public float EmissiveIntensity { get; set; }
+    public float NormalMapScale { get; set; } = 1f;
+    public bool DoubleSided { get; set; }
+    public float CameraFieldOfView { get; set; } = 60f;
+    public float CameraNearClip { get; set; } = 0.05f;
+    public float CameraFarClip { get; set; } = 1000f;
+    public bool CameraOrthographic { get; set; }
+    public float CameraOrthographicSize { get; set; } = 5f;
+    public int CameraDepth { get; set; }
+    public Vector4 CameraBackgroundColor { get; set; } = new Vector4(0.02f, 0.03f, 0.05f, 1f);
+    public bool CameraDrawSkybox { get; set; } = true;
+    public bool CameraDrawGizmos { get; set; } = true;
+    public int CameraCullingMask { get; set; } = 0x7FFFFFFF;
 
     public RuntimeObjectData Clone(int newId)
         => new()
@@ -355,7 +373,15 @@ public sealed class RuntimeObjectData
             LightInnerAngle = LightInnerAngle, LightOuterAngle = LightOuterAngle,
             Tag = Tag, Layer = Layer, ColliderType = ColliderType, ColliderSize = ColliderSize,
             IsTrigger = IsTrigger, HasRigidbody = HasRigidbody, Mass = Mass,
-            UseGravity = UseGravity, IsKinematic = IsKinematic
+            UseGravity = UseGravity, IsKinematic = IsKinematic,
+            HasMaterial = HasMaterial, BaseColor = BaseColor, Metallic = Metallic, Roughness = Roughness,
+            EmissiveColor = EmissiveColor, EmissiveIntensity = EmissiveIntensity,
+            NormalMapScale = NormalMapScale, DoubleSided = DoubleSided,
+            CameraFieldOfView = CameraFieldOfView, CameraNearClip = CameraNearClip,
+            CameraFarClip = CameraFarClip, CameraOrthographic = CameraOrthographic,
+            CameraOrthographicSize = CameraOrthographicSize, CameraDepth = CameraDepth,
+            CameraBackgroundColor = CameraBackgroundColor, CameraDrawSkybox = CameraDrawSkybox,
+            CameraDrawGizmos = CameraDrawGizmos, CameraCullingMask = CameraCullingMask
         };
 
     public void CopyFrom(RuntimeObjectData value)
@@ -369,6 +395,15 @@ public sealed class RuntimeObjectData
         Tag=value.Tag; Layer=value.Layer; ColliderType=value.ColliderType; ColliderSize=value.ColliderSize;
         IsTrigger=value.IsTrigger; HasRigidbody=value.HasRigidbody; Mass=value.Mass;
         UseGravity=value.UseGravity; IsKinematic=value.IsKinematic;
+        HasMaterial=value.HasMaterial; BaseColor=value.BaseColor; Metallic=value.Metallic;
+        Roughness=value.Roughness; EmissiveColor=value.EmissiveColor;
+        EmissiveIntensity=value.EmissiveIntensity; NormalMapScale=value.NormalMapScale;
+        DoubleSided=value.DoubleSided;
+        CameraFieldOfView=value.CameraFieldOfView; CameraNearClip=value.CameraNearClip;
+        CameraFarClip=value.CameraFarClip; CameraOrthographic=value.CameraOrthographic;
+        CameraOrthographicSize=value.CameraOrthographicSize; CameraDepth=value.CameraDepth;
+        CameraBackgroundColor=value.CameraBackgroundColor; CameraDrawSkybox=value.CameraDrawSkybox;
+        CameraDrawGizmos=value.CameraDrawGizmos; CameraCullingMask=value.CameraCullingMask;
     }
 }
 
@@ -543,6 +578,47 @@ public sealed class MeshRenderer : Component
         get => gameObject.State.MeshRendererEnabled;
         set => gameObject.State.MeshRendererEnabled = value;
     }
+
+    /// <summary>Backing material. Modifying it writes straight into the native PBR constants.</summary>
+    public Material material { get; }
+    internal MeshRenderer() => material = new Material(this);
+}
+
+/// <summary>PBR surface values (albedo, metallic, roughness, emission, normal scale, two-sided).</summary>
+public sealed class Material
+{
+    private readonly Component _owner;
+    internal Material(Component owner) => _owner = owner;
+    private RuntimeObjectData State => _owner.gameObject.State;
+
+    public Color color
+    {
+        get { var c = State.BaseColor; return new Color(c.x, c.y, c.z, 1f); }
+        set => State.BaseColor = new Vector3(value.r, value.g, value.b);
+    }
+    public Vector3 baseColor { get => State.BaseColor; set => State.BaseColor = value; }
+    public float metallic { get => State.Metallic; set => State.Metallic = Mathf.Clamp01(value); }
+    public float roughness
+    {
+        get => State.Roughness;
+        set => State.Roughness = Mathf.Clamp(value, 0.045f, 1f);
+    }
+    public Color emissiveColor
+    {
+        get { var c = State.EmissiveColor; return new Color(c.x, c.y, c.z, 1f); }
+        set => State.EmissiveColor = new Vector3(value.r, value.g, value.b);
+    }
+    public float emissiveIntensity { get => State.EmissiveIntensity; set => State.EmissiveIntensity = MathF.Max(0f, value); }
+    public float normalMapScale { get => State.NormalMapScale; set => State.NormalMapScale = MathF.Max(0f, value); }
+    public bool doubleSided { get => State.DoubleSided; set => State.DoubleSided = value; }
+
+    /// <summary>Adds emission so the surface glows and picks up bloom in the post-process pass.</summary>
+    public void EnableEmission(Color tint, float intensity = 2f)
+    {
+        emissiveColor = tint;
+        emissiveIntensity = intensity;
+    }
+    public void DisableEmission() => emissiveIntensity = 0f;
 }
 
 public sealed class Light : Component
@@ -647,13 +723,73 @@ public sealed class Rigidbody : Component
     }
 }
 
-/// <summary>Simple camera component metadata, usable from gameplay scripts.</summary>
+/// <summary>Camera component. Mirrors the native camera fields and exposes Unity-style helpers.</summary>
 public sealed class Camera : Component
 {
-    public float fieldOfView { get; set; } = 60f;
-    public float nearClipPlane { get; set; } = 0.05f;
-    public float farClipPlane { get; set; } = 1000f;
+    public float fieldOfView { get => gameObject.State.CameraFieldOfView; set => gameObject.State.CameraFieldOfView = Mathf.Clamp(value, 1f, 179f); }
+    public float nearClipPlane { get => gameObject.State.CameraNearClip; set => gameObject.State.CameraNearClip = MathF.Max(0.001f, value); }
+    public float farClipPlane { get => gameObject.State.CameraFarClip; set => gameObject.State.CameraFarClip = MathF.Max(nearClipPlane + 0.01f, value); }
+    public bool orthographic { get => gameObject.State.CameraOrthographic; set => gameObject.State.CameraOrthographic = value; }
+    public float orthographicSize { get => gameObject.State.CameraOrthographicSize; set => gameObject.State.CameraOrthographicSize = MathF.Max(0.01f, value); }
+    public int depth { get => gameObject.State.CameraDepth; set => gameObject.State.CameraDepth = value; }
+    public Color backgroundColor
+    {
+        get { var c = gameObject.State.CameraBackgroundColor; return new Color(c.x, c.y, c.z, c.w); }
+        set => gameObject.State.CameraBackgroundColor = new Vector4(value.r, value.g, value.b, value.a);
+    }
+    public bool drawSkybox { get => gameObject.State.CameraDrawSkybox; set => gameObject.State.CameraDrawSkybox = value; }
+    public bool drawGizmos { get => gameObject.State.CameraDrawGizmos; set => gameObject.State.CameraDrawGizmos = value; }
+    public int cullingMask { get => gameObject.State.CameraCullingMask; set => gameObject.State.CameraCullingMask = value; }
+    public float aspect => MathF.Max(0.01f, Screen.width / (float)MathF.Max(1, Screen.height));
+
+    /// <summary>The scene's main camera (the first enabled camera), matching Unity's Camera.main.</summary>
     public static Camera? main => Scene.FindObjectOfType<Camera>();
+
+    public static Camera[] allCameras => Scene.FindObjectsOfType<Camera>();
+
+    /// <summary>World point to viewport space (0..1). Mirrors Camera.WorldToViewportPoint.</summary>
+    public Vector3 WorldToViewportPoint(Vector3 worldPoint)
+    {
+        Vector3 local = transform.InverseTransformPoint(worldPoint);
+        float depth = local.z;
+        if (MathF.Abs(depth) < 1e-5f) depth = 1e-5f;
+        float halfHeight = orthographic ? orthographicSize : MathF.Tan(fieldOfView * Mathf.Deg2Rad * 0.5f) * depth;
+        float halfWidth = halfHeight * aspect;
+        return new Vector3(0.5f + local.x / (2f * MathF.Max(halfWidth, 1e-5f)),
+                            0.5f + local.y / (2f * MathF.Max(halfHeight, 1e-5f)), depth);
+    }
+
+    /// <summary>Viewport point (0..1) to a world-space ray. Mirrors Camera.ViewportPointToRay.</summary>
+    public Ray ViewportPointToRay(Vector3 viewportPoint)
+    {
+        Vector3 forward = transform.forward;
+        if (orthographic)
+        {
+            float halfHeight = orthographicSize;
+            float halfWidth = halfHeight * aspect;
+            Vector3 origin = transform.position
+                + transform.right * ((viewportPoint.x - 0.5f) * 2f * halfWidth)
+                + transform.up * ((viewportPoint.y - 0.5f) * 2f * halfHeight);
+            return new Ray(origin, forward);
+        }
+        float tanHalf = MathF.Tan(fieldOfView * Mathf.Deg2Rad * 0.5f);
+        Vector3 direction = (forward
+            + transform.right * ((viewportPoint.x - 0.5f) * 2f * tanHalf * aspect)
+            + transform.up * ((viewportPoint.y - 0.5f) * 2f * tanHalf)).normalized;
+        return new Ray(transform.position, direction);
+    }
+
+    /// <summary>Screen pixel position to a world-space ray.</summary>
+    public Ray ScreenPointToRay(Vector3 screenPoint)
+        => ViewportPointToRay(new Vector3(screenPoint.x / MathF.Max(1, Screen.width),
+                                          screenPoint.y / MathF.Max(1, Screen.height), 0f));
+
+    /// <summary>World point to screen pixel position.</summary>
+    public Vector3 WorldToScreenPoint(Vector3 worldPoint)
+    {
+        Vector3 viewport = WorldToViewportPoint(worldPoint);
+        return new Vector3(viewport.x * Screen.width, viewport.y * Screen.height, viewport.z);
+    }
 }
 
 /// <summary>WAV playback via the Windows multimedia API. Supports one active PlaySound stream per process.</summary>
@@ -856,6 +992,10 @@ public static class Physics
             foreach (var force in go.GetComponents<ConstantForce>()) force.Simulate(fixedDeltaTime);
             foreach (var auto in go.GetComponents<AutoDestroy>()) auto.Tick(fixedDeltaTime);
             foreach (var aim in go.GetComponents<LookAtTarget>()) aim.Apply();
+            foreach (var spin in go.GetComponents<Rotator>()) spin.Tick(fixedDeltaTime);
+            foreach (var hover in go.GetComponents<Oscillator>()) hover.Tick(fixedDeltaTime);
+            foreach (var kill in go.GetComponents<KillBelowY>()) kill.Tick(fixedDeltaTime);
+            foreach (var pulse in go.GetComponents<MaterialPulse>()) pulse.Tick(fixedDeltaTime);
         }
     }
 
@@ -971,6 +1111,64 @@ public sealed class LookAtTarget : Component
         Vector3 direction = target.transform.position - transform.position;
         if (direction.sqrMagnitude < 1e-8f) return;
         transform.rotation = Quaternion.LookRotation(direction).eulerAngles;
+    }
+}
+
+/// <summary>Spins its GameObject around a local axis every frame. Handy for pickups and props.</summary>
+public sealed class Rotator : Component
+{
+    public Vector3 axis { get; set; } = Vector3.up;
+    public float degreesPerSecond { get; set; } = 90f;
+    internal void Tick(float dt)
+    {
+        if (!enabled || dt <= 0f) return;
+        transform.Rotate(axis.normalized * (degreesPerSecond * dt));
+    }
+}
+
+/// <summary>Moves its GameObject back and forth between two local offsets (platforms, doors, hover).</summary>
+public sealed class Oscillator : Component
+{
+    public Vector3 amplitude { get; set; } = new Vector3(0f, 1f, 0f);
+    public float frequency { get; set; } = 1f;
+    private Vector3 _origin;
+    private bool _captured;
+    internal void Tick(float dt)
+    {
+        if (!enabled) return;
+        if (!_captured) { _origin = transform.position; _captured = true; }
+        float phase = Time.time * frequency * Mathf.PI * 2f;
+        transform.position = _origin + amplitude * MathF.Sin(phase);
+    }
+}
+
+/// <summary>Destroys its GameObject the first time it drops below a world-space Y threshold.</summary>
+public sealed class KillBelowY : Component
+{
+    public float threshold { get; set; } = -50f;
+    internal void Tick(float dt)
+    {
+        if (enabled && transform.position.y < threshold) GameObject.Destroy(gameObject);
+    }
+}
+
+/// <summary>Drives a smooth colour or emission pulse on the object's PBR material.</summary>
+public sealed class MaterialPulse : Component
+{
+    public Color colorA { get; set; } = Color.white;
+    public Color colorB { get; set; } = Color.cyan;
+    public float frequency { get; set; } = 1f;
+    public bool useEmission { get; set; }
+    public float emissionIntensity { get; set; } = 2f;
+    internal void Tick(float dt)
+    {
+        if (!enabled) return;
+        var renderer = gameObject.GetComponent<MeshRenderer>();
+        if (renderer is null) return;
+        float t = 0.5f + 0.5f * MathF.Sin(Time.time * frequency * Mathf.PI * 2f);
+        Color blended = Color.Lerp(colorA, colorB, t);
+        renderer.material.color = blended;
+        if (useEmission) renderer.material.EnableEmission(blended, emissionIntensity);
     }
 }
 
@@ -1367,10 +1565,10 @@ public static class Application
     private static readonly Dictionary<string, string> GameConfig = LoadGameConfig();
     public static bool isPlaying { get; set; }
     public static bool quitRequested { get; private set; }
-    public static string productName => Get("product", "DX12ForgeEngine Project");
-    public static string companyName => Get("company", "DX12 Forge");
+    public static string productName => Get("product", "Forge Engine Project");
+    public static string companyName => Get("company", "Forge Engine");
     public static string creatorName => Get("creator", "");
-    public static string version => "0.5.9";
+    public static string version => "0.5.10";
     public static string dataPath => Environment.CurrentDirectory;
     public static string targetFrameRate { get => "60"; set { } }
     public static void Quit() => quitRequested = true;
