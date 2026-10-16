@@ -2038,7 +2038,7 @@ void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
         ImGui::Separator();
         if (ImGui::Button("Look Through This Camera", ImVec2(-1.0f, 0.0f)))
         {
-            engine.m_viewportCameraObjectIndex = m_selectedObject;
+            engine.m_viewportCameraObjectIndex = engine.m_selectedObject;
             engine.m_cameraPosition = object.position;
             engine.m_cameraYaw = object.rotation.y;
             engine.m_cameraPitch = std::clamp(-object.rotation.x, -1.50f, 1.50f);
@@ -2047,7 +2047,7 @@ void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
             engine.UpdateCamera(0.0f);
             Log("Active camera now drives the Scene viewport.");
         }
-        ImGui::TextDisabled(engine.m_viewportCameraObjectIndex == m_selectedObject
+        ImGui::TextDisabled(engine.m_viewportCameraObjectIndex == engine.m_selectedObject
             ? "This camera is currently rendering the Scene viewport."
             : "Use this to render the Scene viewport through the camera, Unity-style.");
     }
@@ -4646,7 +4646,7 @@ void ForgeEditorUI::ExportGame(ForgeEngine& engine)
 
     // 5) forge_game.ini next to the exe switches the engine into standalone player mode
     //    and points it at the <Product>_Data folder.
-    const auto dataFolderRelative = (product + L"_Data").u8string();
+    const std::string dataFolderRelative = productNameUtf8 + "_Data";
     const auto iniPath = gameDir / L"forge_game.ini";
     std::ofstream ini(iniPath, std::ios::binary | std::ios::trunc);
     ini << "; Forge Engine standalone game configuration\n";

@@ -40,6 +40,13 @@
 - Fixed a field-index bug in the native `SET` parser: camera values were read six tokens too late
   (the managed `SET` line omits `HasMeshRenderer`), so script-driven camera edits were ignored.
 
+## Correções de compilação
+- `dataFolderRelative` no export tentava chamar `u8string()` num `std::wstring` (que não tem esse
+  método), deixando o `auto` sem tipo e quebrando o `<<` do `forge_game.ini`. Agora o nome da pasta
+  `_Data` é montado a partir do nome do produto já em UTF-8.
+- `m_selectedObject` era usado sem o prefixo `engine.` no botão "Look Through This Camera" e no
+  texto do inspetor de câmera (o membro pertence à `ForgeEngine`, não à `ForgeEditorUI`).
+
 ## Câmera estilo Unity
 - Selecting a camera opens a Camera Preview panel fed by a copy of the real post-processed frame.
 - "Look Through Camera" makes that camera drive the Scene viewport; the camera's own icon is
