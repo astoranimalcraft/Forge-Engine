@@ -17,7 +17,7 @@ Forge Engine use HLSL for construct Shader.
 
 # Forge-Engine 
 
-é uma "Game Engine" criado com IA e por Hobby. esse é um pequeno projeto simples criado por Astor em C++ e DirectX12
+ForgeEngine é uma "Game Engine" criado com IA e por Hobby. esse é um pequeno projeto simples criado por Astor em C++ e DirectX12
 
 # Linguagem da Engine
 ForgeEngine é Ingles. não tem portugues
