@@ -1909,6 +1909,9 @@ bool ForgeEngine::HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
             {
                 m_cameraYaw += static_cast<float>(raw.data.mouse.lLastX) * 0.0035f;
                 m_cameraPitch -= static_cast<float>(raw.data.mouse.lLastY) * 0.0035f;
+                // Yaw accumulates forever otherwise. Past a few thousand turns the float loses
+                // enough precision that sin/cos jitter and the camera visibly shakes.
+                m_cameraYaw = std::remainder(m_cameraYaw, 2.0f * Pi);
                 m_cameraPitch = std::clamp(m_cameraPitch, -1.52f, 1.52f);
             }
             // DefWindowProc performs the required cleanup for foreground WM_INPUT packets.
@@ -2019,15 +2022,33 @@ void ForgeEngine::UpdateCamera(float deltaSeconds)
         // While RMB is held, raw input owns yaw/pitch so it is not overwritten each frame.
         if (!m_rightMouseDown)
         {
-            m_cameraYaw = viewportCamera->rotation.y;
+            m_cameraYaw = std::remainder(viewportCamera->rotation.y, 2.0f * Pi);
             m_cameraPitch = std::clamp(-viewportCamera->rotation.x, -1.52f, 1.52f);
         }
     }
 
-    const float sinYaw = std::sin(m_cameraYaw), cosYaw = std::cos(m_cameraYaw);
-    const float sinPitch = std::sin(m_cameraPitch), cosPitch = std::cos(m_cameraPitch);
-    const XMFLOAT3 forwardDirection{ cosPitch * sinYaw, sinPitch, cosPitch * cosYaw };
-    const XMFLOAT3 rightDirection{ cosYaw, 0.0f, -sinYaw };
+    // Derive the navigation basis from the camera's own orientation when a camera component is
+    // active, so WASD follows what the view actually shows. These are rows 2 and 0 of the
+    // XMMatrixRotationRollPitchYaw convention, with roll folded out; using the Euler angles
+    // directly avoids depending on a world matrix that may not be rebuilt yet this frame.
+    XMFLOAT3 forwardDirection{};
+    XMFLOAT3 rightDirection{};
+    if (viewportCamera)
+    {
+        const float pitch = viewportCamera->rotation.x;
+        const float yaw = viewportCamera->rotation.y;
+        const float sinYaw = std::sin(yaw), cosYaw = std::cos(yaw);
+        const float sinPitch = std::sin(pitch), cosPitch = std::cos(pitch);
+        forwardDirection = { cosPitch * sinYaw, -sinPitch, cosPitch * cosYaw };
+        rightDirection = { cosYaw, 0.0f, -sinYaw };
+    }
+    else
+    {
+        const float sinYaw = std::sin(m_cameraYaw), cosYaw = std::cos(m_cameraYaw);
+        const float sinPitch = std::sin(m_cameraPitch), cosPitch = std::cos(m_cameraPitch);
+        forwardDirection = { cosPitch * sinYaw, sinPitch, cosPitch * cosYaw };
+        rightDirection = { cosYaw, 0.0f, -sinYaw };
+    }
     XMFLOAT3 movement{ 0.0f, 0.0f, 0.0f };
     auto isDown = [](int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; };
 
@@ -2090,7 +2111,14 @@ void ForgeEngine::UpdateCamera(float deltaSeconds)
 
     const float sceneWidth = std::max(1.0f, m_sceneViewportWidth);
     const float sceneHeight = std::max(1.0f, m_sceneViewportHeight);
-    const XMMATRIX projection = XMMatrixPerspectiveFovLH(fovRadians, sceneWidth / sceneHeight, nearClip, farClip);
+    const XMMATRIX projection = viewportCamera && viewportCamera->cameraOrthographic
+        ? XMMatrixOrthographicOffCenterLH(
+            -viewportCamera->cameraOrthographicSize * (sceneWidth / sceneHeight),
+             viewportCamera->cameraOrthographicSize * (sceneWidth / sceneHeight),
+            -viewportCamera->cameraOrthographicSize,
+             viewportCamera->cameraOrthographicSize,
+             nearClip, farClip)
+        : XMMatrixPerspectiveFovLH(fovRadians, sceneWidth / sceneHeight, nearClip, farClip);
     const XMMATRIX viewProjection = view * projection;
     const XMMATRIX inverseViewProjection = XMMatrixInverse(nullptr, viewProjection);
     XMStoreFloat4x4(&m_view, view);
@@ -2114,12 +2142,14 @@ bool ForgeEngine::BuildMouseRay(int mouseX, int mouseY, XMFLOAT3& origin, XMFLOA
     const XMVECTOR farPoint = XMVector3TransformCoord(XMVectorSet(ndcX, ndcY, 1.0f, 1.0f), inverseViewProjection);
     XMVECTOR cameraOrigin = XMLoadFloat3(&m_cameraPosition);
     // A near-to-far direction is more numerically stable than treating the unprojected
-    // far position as a direction, but still starts at the actual camera eye for picking.
+    // far position as a direction. In perspective every ray shares the eye, but an
+    // orthographic ray starts wherever the near plane places it.
     XMVECTOR ray = XMVector3Normalize(XMVectorSubtract(farPoint, nearPoint));
-    // Perspective projection rays share the eye as origin; orthographic mode isn't used
-    // by this viewport but keeping the origin explicit makes that contract clear.
-    (void)nearPoint;
-    XMStoreFloat3(&origin, cameraOrigin);
+    const bool orthographic = m_viewportCameraObjectIndex >= 0 &&
+        m_viewportCameraObjectIndex < static_cast<int>(m_objects.size()) &&
+        m_objects[static_cast<size_t>(m_viewportCameraObjectIndex)].isCamera &&
+        m_objects[static_cast<size_t>(m_viewportCameraObjectIndex)].cameraOrthographic;
+    XMStoreFloat3(&origin, orthographic ? nearPoint : cameraOrigin);
     XMStoreFloat3(&direction, ray);
     return true;
 }
@@ -2418,10 +2448,40 @@ void ForgeEngine::UpdateGizmoDrag(int mouseX, int mouseY)
         float delta = angle - m_dragStartAngle;
         while (delta > Pi) delta -= 2.0f * Pi;
         while (delta < -Pi) delta += 2.0f * Pi;
-        object.rotation = m_dragStartRotation;
-        if (m_gizmoAxis == 0) object.rotation.x += delta;
-        else if (m_gizmoAxis == 1) object.rotation.y += delta;
-        else object.rotation.z += delta;
+
+        // Composing the delta onto the Euler components would add it to one axis
+        // independently, which is only valid while the other two are zero; as soon as they
+        // are not, the object tumbles (classic gimbal lock). Rotate the start orientation by
+        // a quaternion about the world axis instead, then read the Euler angles back.
+        const XMVECTOR startOrientation = XMQuaternionRotationRollPitchYaw(
+            m_dragStartRotation.x, m_dragStartRotation.y, m_dragStartRotation.z);
+        const XMVECTOR rotationAxis = XMVectorSet(axis.x, axis.y, axis.z, 0.0f);
+        const XMVECTOR deltaOrientation = XMQuaternionRotationAxis(rotationAxis, delta);
+        // XMQuaternionMultiply(a, b) returns b*a, so passing (start, delta) yields
+        // delta*start: the world-space rotation applied after the start orientation.
+        const XMVECTOR result = XMQuaternionNormalize(XMQuaternionMultiply(startOrientation, deltaOrientation));
+
+        XMFLOAT4X4 basis{};
+        XMStoreFloat4x4(&basis, XMMatrixRotationQuaternion(result));
+        // Inverse of XMMatrixRotationRollPitchYaw (which composes Rz * Rx * Ry and stores the
+        // result row-major). The repo's free camera depends on this same convention: with
+        // rotation.x = -pitch, its forward formula matches row 2 exactly.
+        const float pitch = std::asin(std::clamp(-basis.m[2][1], -1.0f, 1.0f));
+        const float cosPitch = std::cos(pitch);
+        float yaw, roll;
+        if (std::abs(cosPitch) > 1.0e-4f)
+        {
+            yaw = std::atan2(basis.m[2][0], basis.m[2][2]);
+            roll = std::atan2(basis.m[0][1], basis.m[1][1]);
+        }
+        else
+        {
+            // Gimbal lock: yaw and roll describe the same rotation, so fold everything into
+            // yaw and keep roll at zero.
+            yaw = std::atan2(-basis.m[0][2], basis.m[0][0]);
+            roll = 0.0f;
+        }
+        object.rotation = { pitch, yaw, roll };
     }
     else
     {
@@ -2669,7 +2729,10 @@ void ForgeEngine::UpdateConstantBuffers(float totalSeconds)
         if (object.hasCollider && object.colliderConstants[m_frameIndex])
         {
             ObjectConstants collider{};
+            // The wire mesh is unit-sized around its own origin, so the offset is applied here
+            // as a translation between the object matrix and the size scaling.
             const XMMATRIX colliderWorld = XMLoadFloat4x4(&object.world) *
+                XMMatrixTranslation(object.colliderCenter.x, object.colliderCenter.y, object.colliderCenter.z) *
                 XMMatrixScaling(object.colliderSize.x, object.colliderSize.y, object.colliderSize.z);
             XMStoreFloat4x4(&collider.world, colliderWorld);
             XMStoreFloat4x4(&collider.normalTransform, XMMatrixTranspose(XMMatrixInverse(nullptr, colliderWorld)));

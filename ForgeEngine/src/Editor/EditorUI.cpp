@@ -2198,6 +2198,12 @@ void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
             if (ImGui::Combo("Collider Type", &colliderType, colliderTypes, IM_ARRAYSIZE(colliderTypes)))
                 object.colliderType = colliderType;
             ImGui::DragFloat3("Collider Size", &object.colliderSize.x, 0.05f, 0.01f, 100.0f, "%.2f");
+            ImGui::DragFloat3("Collider Center", &object.colliderCenter.x, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##ColliderCenter"))
+                object.colliderCenter = { 0.0f, 0.0f, 0.0f };
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Local-space offset of the collision shape from the object origin.");
             ImGui::Checkbox("Is Trigger", &object.isTrigger);
         }
         ImGui::Checkbox("Rigidbody component", &object.hasRigidbody);
@@ -2208,6 +2214,67 @@ void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
             ImGui::Checkbox("Is Kinematic", &object.rigidbodyIsKinematic);
         }
         ImGui::Checkbox("Audio Source component", &object.hasAudioSource);
+        if (object.hasAudioSource)
+        {
+            ImGui::DragFloat("Volume", &object.audioSourceVolume, 0.01f, 0.0f, 4.0f, "%.2f");
+            ImGui::DragFloat("Pitch", &object.audioSourcePitch, 0.01f, 0.1f, 3.0f, "%.2f");
+            ImGui::Checkbox("Loop", &object.audioSourceLoop);
+            ImGui::Checkbox("Play On Awake", &object.audioSourcePlayOnAwake);
+            ImGui::Checkbox("Spatial Blend (3D)", &object.audioSourceSpatial);
+            if (object.audioSourceSpatial)
+            {
+                ImGui::DragFloat("Min Distance", &object.audioSourceMinDistance, 0.05f, 0.01f, 1000.0f, "%.2f");
+                ImGui::DragFloat("Max Distance", &object.audioSourceMaxDistance, 1.0f, 0.1f, 10000.0f, "%.1f");
+            }
+            ImGui::TextDisabled("Clip: %s", object.audioSourceClipPath.empty() ? "(none)" : object.audioSourceClipPath.c_str());
+        }
+
+        ImGui::Checkbox("Audio Listener component", &object.hasAudioListener);
+        if (object.hasAudioListener)
+        {
+            ImGui::DragFloat("Listener Volume", &object.audioListenerVolume, 0.01f, 0.0f, 4.0f, "%.2f");
+            ImGui::TextDisabled("Place exactly one listener; it defines the ear transform.");
+        }
+
+        ImGui::Checkbox("Character Controller component", &object.hasCharacterController);
+        if (object.hasCharacterController)
+        {
+            ImGui::DragFloat("Height", &object.characterHeight, 0.05f, 0.2f, 20.0f, "%.2f");
+            ImGui::DragFloat("Radius", &object.characterRadius, 0.02f, 0.05f, 10.0f, "%.3f");
+            ImGui::DragFloat("Slope Limit", &object.characterSlopeLimit, 0.5f, 0.0f, 89.0f, "%.1f deg");
+            ImGui::DragFloat("Step Offset", &object.characterStepOffset, 0.01f, 0.0f, 2.0f, "%.3f");
+            ImGui::DragFloat("Skin Width", &object.characterSkinWidth, 0.001f, 0.0f, 0.5f, "%.3f");
+            ImGui::DragFloat("Gravity", &object.characterGravity, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Move Speed", &object.characterSpeed, 0.1f, 0.0f, 200.0f, "%.2f");
+            ImGui::DragFloat("Jump Height", &object.characterJumpHeight, 0.05f, 0.0f, 50.0f, "%.2f");
+            ImGui::Text("Grounded: %s", object.characterIsGrounded ? "yes" : "no");
+            ImGui::DragFloat3("Velocity", &object.characterVelocity.x, 0.05f, -1000.0f, 1000.0f, "%.2f");
+        }
+
+        ImGui::Checkbox("Particle System component", &object.hasParticleSystem);
+        if (object.hasParticleSystem)
+        {
+            ImGui::DragInt("Max Particles", &object.particleMaxCount, 8.0f, 1, 100000);
+            ImGui::DragFloat("Lifetime", &object.particleLifetime, 0.05f, 0.05f, 120.0f, "%.2f");
+            ImGui::DragFloat("Start Speed", &object.particleStartSpeed, 0.05f, 0.0f, 200.0f, "%.2f");
+            ImGui::DragFloat("Start Size", &object.particleStartSize, 0.01f, 0.001f, 10.0f, "%.3f");
+            ImGui::DragFloat("Gravity", &object.particleGravity, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Emission Rate", &object.particleEmissionRate, 1.0f, 0.0f, 10000.0f, "%.1f /s");
+            ImGui::ColorEdit3("Start Color", &object.particleStartColor.x);
+            ImGui::DragFloat3("Direction", &object.particleDirection.x, 0.02f, -1.0f, 1.0f, "%.3f");
+            ImGui::DragFloat("Spread", &object.particleSpread, 0.5f, 0.0f, 180.0f, "%.1f deg");
+            ImGui::Checkbox("Looping", &object.particleLooping);
+        }
+
+        ImGui::Checkbox("Animator component", &object.hasAnimator);
+        if (object.hasAnimator)
+        {
+            ImGui::TextDisabled("Clip: %s", object.animatorClipName.empty() ? "(none)" : object.animatorClipName.c_str());
+            ImGui::DragFloat("Speed", &object.animatorSpeed, 0.01f, -10.0f, 10.0f, "%.2f");
+            ImGui::Checkbox("Loop", &object.animatorLoop);
+            ImGui::Checkbox("Playing", &object.animatorPlaying);
+            ImGui::DragFloat("Time", &object.animatorTime, 0.01f, 0.0f, 3600.0f, "%.3f s");
+        }
         ImGui::Separator();
         if (ImGui::Button("+ Add Component", ImVec2(-1.0f, 0.0f)))
             ImGui::OpenPopup("Add Component Popup");
@@ -2233,6 +2300,18 @@ void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
                     if (object.isCamera) engine.m_viewportCameraObjectIndex = -1;
                 }
                 if (ImGui::MenuItem("Audio Source", nullptr, object.hasAudioSource)) object.hasAudioSource = !object.hasAudioSource;
+                if (ImGui::MenuItem("Audio Listener", nullptr, object.hasAudioListener)) object.hasAudioListener = !object.hasAudioListener;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Effects"))
+            {
+                if (ImGui::MenuItem("Particle System", nullptr, object.hasParticleSystem)) object.hasParticleSystem = !object.hasParticleSystem;
+                if (ImGui::MenuItem("Animator", nullptr, object.hasAnimator)) object.hasAnimator = !object.hasAnimator;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Character"))
+            {
+                if (ImGui::MenuItem("Character Controller", nullptr, object.hasCharacterController)) object.hasCharacterController = !object.hasCharacterController;
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Lighting"))
@@ -3802,7 +3881,7 @@ bool ForgeEditorUI::SaveScene(ForgeEngine& engine, const std::filesystem::path& 
         Log("ERROR: Could not save scene: " + path.string());
         return false;
     }
-    out << "FORGEENGINE_SCENE 9\n";
+    out << "FORGEENGINE_SCENE 11\n";
     out << "OBJECT_COUNT " << engine.m_objects.size() << '\n';
     for (const auto& object : engine.m_objects)
     {
@@ -3850,7 +3929,24 @@ bool ForgeEditorUI::SaveScene(ForgeEngine& engine, const std::filesystem::path& 
             << object.cameraBackgroundColor.z << ' ' << object.cameraBackgroundColor.w << ' '
             << object.cameraDrawSkybox << ' ' << object.cameraDrawGizmos << ' '
             << object.cameraCullingMask << ' '
-            << object.hasMaterial << ' ';
+            << object.hasMaterial << ' '
+            << object.colliderCenter.x << ' ' << object.colliderCenter.y << ' ' << object.colliderCenter.z << ' '
+            << object.hasCharacterController << ' ' << object.characterHeight << ' ' << object.characterRadius << ' '
+            << object.characterSlopeLimit << ' ' << object.characterStepOffset << ' ' << object.characterSkinWidth << ' '
+            << object.characterGravity << ' ' << object.characterSpeed << ' ' << object.characterJumpHeight << ' '
+            << object.hasParticleSystem << ' ' << object.particleMaxCount << ' ' << object.particleLifetime << ' '
+            << object.particleStartSpeed << ' ' << object.particleStartSize << ' ' << object.particleGravity << ' '
+            << object.particleEmissionRate << ' '
+            << object.particleStartColor.x << ' ' << object.particleStartColor.y << ' ' << object.particleStartColor.z << ' '
+            << object.particleDirection.x << ' ' << object.particleDirection.y << ' ' << object.particleDirection.z << ' '
+            << object.particleSpread << ' ' << object.particleLooping << ' '
+            << object.hasAnimator << ' ' << std::quoted(object.animatorClipName) << ' '
+            << object.animatorSpeed << ' ' << object.animatorLoop << ' ' << object.animatorPlaying << ' '
+            << object.hasAudioListener << ' ' << object.audioListenerVolume << ' '
+            << object.audioSourceVolume << ' ' << object.audioSourcePitch << ' '
+            << object.audioSourceMinDistance << ' ' << object.audioSourceMaxDistance << ' '
+            << object.audioSourceLoop << ' ' << object.audioSourcePlayOnAwake << ' '
+            << std::quoted(object.audioSourceClipPath) << ' ' << object.audioSourceSpatial << ' ';
         out << '\n';
     }
     if (!out.good())
@@ -3879,7 +3975,7 @@ bool ForgeEditorUI::LoadScene(ForgeEngine& engine, const std::filesystem::path& 
     in >> signature >> version;
     // Accept both the legacy DX12FORGE_SCENE tag and the current FORGEENGINE_SCENE tag
     // so scenes authored before the engine rename keep loading.
-    if (!in || (signature != "FORGEENGINE_SCENE" && signature != "DX12FORGE_SCENE") || (version < 1 || version > 9))
+    if (!in || (signature != "FORGEENGINE_SCENE" && signature != "DX12FORGE_SCENE") || (version < 1 || version > 11))
     {
         Log("ERROR: Invalid or unsupported scene file.");
         return false;
@@ -3988,6 +4084,33 @@ bool ForgeEditorUI::LoadScene(ForgeEngine& engine, const std::filesystem::path& 
                         object.cameraOrthographicSize = std::clamp(object.cameraOrthographicSize, 0.1f, 500.0f);
                         object.cameraDepth = std::clamp(object.cameraDepth, -100, 100);
                         in >> object.hasMaterial;
+                    }
+                    if (version >= 10)
+                        in >> object.colliderCenter.x >> object.colliderCenter.y >> object.colliderCenter.z;
+                    if (version >= 11)
+                    {
+                        in >> object.hasCharacterController >> object.characterHeight >> object.characterRadius
+                           >> object.characterSlopeLimit >> object.characterStepOffset >> object.characterSkinWidth
+                           >> object.characterGravity >> object.characterSpeed >> object.characterJumpHeight
+                           >> object.hasParticleSystem >> object.particleMaxCount >> object.particleLifetime
+                           >> object.particleStartSpeed >> object.particleStartSize >> object.particleGravity
+                           >> object.particleEmissionRate
+                           >> object.particleStartColor.x >> object.particleStartColor.y >> object.particleStartColor.z
+                           >> object.particleDirection.x >> object.particleDirection.y >> object.particleDirection.z
+                           >> object.particleSpread >> object.particleLooping
+                           >> object.hasAnimator >> std::quoted(object.animatorClipName)
+                           >> object.animatorSpeed >> object.animatorLoop >> object.animatorPlaying
+                           >> object.hasAudioListener >> object.audioListenerVolume
+                           >> object.audioSourceVolume >> object.audioSourcePitch
+                           >> object.audioSourceMinDistance >> object.audioSourceMaxDistance
+                           >> object.audioSourceLoop >> object.audioSourcePlayOnAwake
+                           >> std::quoted(object.audioSourceClipPath) >> object.audioSourceSpatial;
+                        object.characterHeight = std::clamp(object.characterHeight, 0.2f, 20.0f);
+                        object.characterRadius = std::clamp(object.characterRadius, 0.05f, 10.0f);
+                        object.particleMaxCount = std::clamp(object.particleMaxCount, 1, 100000);
+                        object.particleLifetime = std::clamp(object.particleLifetime, 0.05f, 120.0f);
+                        object.particleStartSize = std::max(0.001f, object.particleStartSize);
+                        object.animatorSpeed = std::clamp(object.animatorSpeed, -10.0f, 10.0f);
                     }
                 }
             }
@@ -5121,6 +5244,46 @@ void ForgeEditorUI::TickScripts(ForgeEngine& engine, float deltaSeconds)
         state.layer = object.layer;
         state.colliderType = object.colliderType;
         state.colliderSize = { object.colliderSize.x, object.colliderSize.y, object.colliderSize.z };
+        state.colliderCenter = { object.colliderCenter.x, object.colliderCenter.y, object.colliderCenter.z };
+        state.parentIndex = object.parentIndex;
+        state.hasCharacterController = object.hasCharacterController;
+        state.characterHeight = object.characterHeight;
+        state.characterRadius = object.characterRadius;
+        state.characterSlopeLimit = object.characterSlopeLimit;
+        state.characterStepOffset = object.characterStepOffset;
+        state.characterSkinWidth = object.characterSkinWidth;
+        state.characterGravity = object.characterGravity;
+        state.characterSpeed = object.characterSpeed;
+        state.characterJumpHeight = object.characterJumpHeight;
+        state.characterVelocity = { object.characterVelocity.x, object.characterVelocity.y, object.characterVelocity.z };
+        state.characterIsGrounded = object.characterIsGrounded;
+        state.hasParticleSystem = object.hasParticleSystem;
+        state.particleMaxCount = object.particleMaxCount;
+        state.particleLifetime = object.particleLifetime;
+        state.particleStartSpeed = object.particleStartSpeed;
+        state.particleStartSize = object.particleStartSize;
+        state.particleGravity = object.particleGravity;
+        state.particleEmissionRate = object.particleEmissionRate;
+        state.particleStartColor = { object.particleStartColor.x, object.particleStartColor.y, object.particleStartColor.z };
+        state.particleDirection = { object.particleDirection.x, object.particleDirection.y, object.particleDirection.z };
+        state.particleSpread = object.particleSpread;
+        state.particleLooping = object.particleLooping;
+        state.hasAnimator = object.hasAnimator;
+        state.animatorClipName = object.animatorClipName;
+        state.animatorSpeed = object.animatorSpeed;
+        state.animatorLoop = object.animatorLoop;
+        state.animatorPlaying = object.animatorPlaying;
+        state.animatorTime = object.animatorTime;
+        state.hasAudioListener = object.hasAudioListener;
+        state.audioListenerVolume = object.audioListenerVolume;
+        state.audioSourceVolume = object.audioSourceVolume;
+        state.audioSourcePitch = object.audioSourcePitch;
+        state.audioSourceMinDistance = object.audioSourceMinDistance;
+        state.audioSourceMaxDistance = object.audioSourceMaxDistance;
+        state.audioSourceLoop = object.audioSourceLoop;
+        state.audioSourcePlayOnAwake = object.audioSourcePlayOnAwake;
+        state.audioSourceClipPath = object.audioSourceClipPath;
+        state.audioSourceSpatial = object.audioSourceSpatial;
         state.isTrigger = object.isTrigger;
         state.hasRigidbody = object.hasRigidbody;
         state.mass = object.rigidbodyMass;
@@ -5176,6 +5339,47 @@ void ForgeEditorUI::TickScripts(ForgeEngine& engine, float deltaSeconds)
         object.layer = std::clamp(state.layer, 0, 31);
         object.colliderType = std::clamp(state.colliderType, 0, 2);
         object.colliderSize = { std::max(0.01f,state.colliderSize.x), std::max(0.01f,state.colliderSize.y), std::max(0.01f,state.colliderSize.z) };
+        object.colliderCenter = { state.colliderCenter.x, state.colliderCenter.y, state.colliderCenter.z };
+        if (state.parentIndex >= -1 && state.parentIndex < static_cast<int>(engine.m_objects.size()))
+            object.parentIndex = state.parentIndex;
+        object.hasCharacterController = state.hasCharacterController;
+        object.characterHeight = std::clamp(state.characterHeight, 0.2f, 20.0f);
+        object.characterRadius = std::clamp(state.characterRadius, 0.05f, 10.0f);
+        object.characterSlopeLimit = std::clamp(state.characterSlopeLimit, 0.0f, 89.0f);
+        object.characterStepOffset = std::clamp(state.characterStepOffset, 0.0f, 2.0f);
+        object.characterSkinWidth = std::clamp(state.characterSkinWidth, 0.0f, 0.5f);
+        object.characterGravity = state.characterGravity;
+        object.characterSpeed = std::max(0.0f, state.characterSpeed);
+        object.characterJumpHeight = std::max(0.0f, state.characterJumpHeight);
+        object.characterVelocity = { state.characterVelocity.x, state.characterVelocity.y, state.characterVelocity.z };
+        object.characterIsGrounded = state.characterIsGrounded;
+        object.hasParticleSystem = state.hasParticleSystem;
+        object.particleMaxCount = std::clamp(state.particleMaxCount, 1, 100000);
+        object.particleLifetime = std::clamp(state.particleLifetime, 0.05f, 120.0f);
+        object.particleStartSpeed = std::max(0.0f, state.particleStartSpeed);
+        object.particleStartSize = std::max(0.001f, state.particleStartSize);
+        object.particleGravity = state.particleGravity;
+        object.particleEmissionRate = std::max(0.0f, state.particleEmissionRate);
+        object.particleStartColor = { state.particleStartColor.x, state.particleStartColor.y, state.particleStartColor.z };
+        object.particleDirection = { state.particleDirection.x, state.particleDirection.y, state.particleDirection.z };
+        object.particleSpread = std::clamp(state.particleSpread, 0.0f, 180.0f);
+        object.particleLooping = state.particleLooping;
+        object.hasAnimator = state.hasAnimator;
+        object.animatorClipName = state.animatorClipName;
+        object.animatorSpeed = std::clamp(state.animatorSpeed, -10.0f, 10.0f);
+        object.animatorLoop = state.animatorLoop;
+        object.animatorPlaying = state.animatorPlaying;
+        object.animatorTime = std::max(0.0f, state.animatorTime);
+        object.hasAudioListener = state.hasAudioListener;
+        object.audioListenerVolume = std::clamp(state.audioListenerVolume, 0.0f, 4.0f);
+        object.audioSourceVolume = std::clamp(state.audioSourceVolume, 0.0f, 4.0f);
+        object.audioSourcePitch = std::clamp(state.audioSourcePitch, 0.1f, 3.0f);
+        object.audioSourceMinDistance = std::max(0.01f, state.audioSourceMinDistance);
+        object.audioSourceMaxDistance = std::max(object.audioSourceMinDistance, state.audioSourceMaxDistance);
+        object.audioSourceLoop = state.audioSourceLoop;
+        object.audioSourcePlayOnAwake = state.audioSourcePlayOnAwake;
+        object.audioSourceClipPath = state.audioSourceClipPath;
+        object.audioSourceSpatial = state.audioSourceSpatial;
         object.isTrigger = state.isTrigger;
         object.hasCollider = state.hasCollider;
         object.hasRigidbody = state.hasRigidbody;

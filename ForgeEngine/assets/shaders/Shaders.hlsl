@@ -418,6 +418,16 @@ float GradientNoise3D(float3 p)
     return lerp(lerp(x00, x10, u.y), lerp(x01, x11, u.y), u.z);
 }
 
+// Rotating the domain between octaves is what actually removes the visible grid.
+// Gradient noise lives on an axis-aligned lattice, so stacking octaves without
+// rotation lines every octave's lattice up with the others and the shared spacing
+// reads as square cells. This matrix is orthonormal (determinant +1), so it turns
+// the lattice without stretching the noise.
+static const float3x3 kCloudOctaveRotation = float3x3(
+     0.00f,  0.80f,  0.60f,
+    -0.80f,  0.36f, -0.48f,
+    -0.60f, -0.48f,  0.64f);
+
 float CloudFBM3D(float3 p, int octaves)
 {
     float value = 0.0f;
@@ -428,7 +438,7 @@ float CloudFBM3D(float3 p, int octaves)
     {
         value += amplitude * GradientNoise3D(p);
         total += amplitude;
-        p = p * 2.03f + float3(13.7f, 7.1f, 5.3f);
+        p = mul(p, kCloudOctaveRotation) * 2.03f + float3(13.7f, 7.1f, 5.3f);
         amplitude *= 0.5f;
     }
     return value / max(total, 1.0e-5f) * 0.5f + 0.5f;

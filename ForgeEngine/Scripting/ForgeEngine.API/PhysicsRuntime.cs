@@ -41,6 +41,33 @@ public static class Physics
     /// <summary>Angular velocity threshold below which a body is allowed to sleep.</summary>
     public static float sleepThreshold { get; set; } = 0.05f;
 
+    /// <summary>Number of constraint solver iterations per step. More iterations give steadier stacks at a higher cost.</summary>
+    public static int solverIterations
+    {
+        get => _solverIterations;
+        set
+        {
+            _solverIterations = Math.Clamp(value, 1, 60);
+            if (_world is not null) _world.SolverInfo.NumIterations = _solverIterations;
+        }
+    }
+    private static int _solverIterations = 10;
+
+    /// <summary>Maximum number of fixed substeps a single step may run. 1 disables substepping.</summary>
+    public static int maxSubSteps { get; set; } = 4;
+
+    /// <summary>Fixed step used for substepping, in seconds.</summary>
+    public static float fixedTimeStep { get; set; } = 1f / 60f;
+
+    /// <summary>Maximum travel per substep, in metres. Smaller values stop fast objects tunnelling through walls.</summary>
+    public static float maxSubStepTravel { get; set; } = 2f;
+
+    /// <summary>Enables continuous collision detection for every dynamic body, which stops fast objects passing through thin geometry.</summary>
+    public static bool continuousCollisionDetection { get; set; }
+
+    /// <summary>Gap kept between shapes, in metres. A slightly larger margin is cheaper and more stable than a tight one.</summary>
+    public static float collisionMargin { get; set; } = 0.02f;
+
     private static DefaultCollisionConfiguration? _configuration;
     private static CollisionDispatcher? _dispatcher;
     private static DbvtBroadphase? _broadphase;
@@ -65,6 +92,8 @@ public static class Physics
         public int LastType = -1;
         public Vector3 LastSize;
         public Vector3 LastScale;
+        public Vector3 LastCenter;
+        public Vector3 LastRotation;
         public bool LastTrigger;
         public bool LastKinematic;
         public float LastMass;
@@ -109,6 +138,7 @@ public static class Physics
         _solver = new SequentialImpulseConstraintSolver();
         _world = new DiscreteDynamicsWorld(_dispatcher, _broadphase, _solver, _configuration);
         _world.Gravity = ToBullet(_gravity);
+        _world.SolverInfo.NumIterations = _solverIterations;
         // Without this, ghost objects never populate their overlap list.
         _ghostPairCallback = new GhostPairCallback();
         _broadphase.OverlappingPairCache!.SetInternalGhostPairCallback(_ghostPairCallback);
@@ -147,7 +177,22 @@ public static class Physics
         entry.Shape.Dispose();
     }
 
-    private static CollisionShape CreateShape(int type, Vector3 size, Vector3 scale)
+    private static CollisionShape CreateShape(int type, Vector3 size, Vector3 scale, Vector3 center)
+    {
+        var shape = CreatePrimitiveShape(type, size, scale);
+
+        // A collision shape always sits on the body origin. To offset it, Bullet wants the
+        // shape inside a compound with a child transform; setting a transform on the body
+        // would move the whole object instead.
+        if (center.x == 0f && center.y == 0f && center.z == 0f) return shape;
+
+        var compound = new CompoundShape();
+        var childTransform = BM.Translation(center.x * scale.x, center.y * scale.y, center.z * scale.z);
+        compound.AddChildShape(childTransform, shape);
+        return compound;
+    }
+
+    private static CollisionShape CreatePrimitiveShape(int type, Vector3 size, Vector3 scale)
     {
         float sx = MathF.Abs(size.x * scale.x), sy = MathF.Abs(size.y * scale.y), sz = MathF.Abs(size.z * scale.z);
         switch (type)
@@ -166,6 +211,18 @@ public static class Physics
             default:
                 return new BoxShape(new BV3(MathF.Max(0.005f, sx * 0.5f), MathF.Max(0.005f, sy * 0.5f), MathF.Max(0.005f, sz * 0.5f)));
         }
+    }
+
+    /// <summary>Local-space half extent of the shape, used for the world bounds accessor.</summary>
+    internal static Vector3 LocalHalfExtent(int type, Vector3 size, Vector3 scale)
+    {
+        float sx = MathF.Abs(size.x * scale.x), sy = MathF.Abs(size.y * scale.y), sz = MathF.Abs(size.z * scale.z);
+        return type switch
+        {
+            1 => new Vector3(0.5f * MathF.Max(sx, MathF.Max(sy, sz)), 0.5f * MathF.Max(sx, MathF.Max(sy, sz)), 0.5f * MathF.Max(sx, MathF.Max(sy, sz))),
+            2 => new Vector3(0.5f * MathF.Max(sx, sz), 0.5f * sy, 0.5f * MathF.Max(sx, sz)),
+            _ => new Vector3(0.5f * sx, 0.5f * sy, 0.5f * sz)
+        };
     }
 
     /// <summary>Reconciles the Bullet bodies with the current scene state.</summary>
@@ -192,6 +249,7 @@ public static class Physics
             }
             else if (entry.LastType != state.ColliderType || entry.LastSize != state.ColliderSize ||
                      entry.LastScale != state.Scale || entry.LastTrigger != trigger ||
+                     entry.LastCenter != state.ColliderCenter ||
                      entry.LastKinematic != kinematic)
             {
                 // Structure changed (shape, size, scale, trigger or kinematic flag):
@@ -221,7 +279,7 @@ public static class Physics
     {
         var state = go.State;
         var position = positionOverride ?? state.Position;
-        var shape = CreateShape(state.ColliderType, state.ColliderSize, state.Scale);
+        var shape = CreateShape(state.ColliderType, state.ColliderSize, state.Scale, state.ColliderCenter);
         var transform = ComposeTransform(position, state.Rotation);
         var motion = new DefaultMotionState(transform);
         float mass = dynamic ? MathF.Max(0.01f, state.Mass) : 0f;
@@ -250,6 +308,8 @@ public static class Physics
             LastType = state.ColliderType,
             LastSize = state.ColliderSize,
             LastScale = state.Scale,
+            LastCenter = state.ColliderCenter,
+            LastRotation = state.Rotation,
             LastTrigger = trigger,
             LastKinematic = kinematic,
             LastMass = state.Mass,
@@ -305,10 +365,24 @@ public static class Physics
         entry.Body.Restitution = restitution;
 
         var rb = go.GetComponent<Rigidbody>();
-        if (rb is not null) entry.Body.SetDamping(MathF.Max(0f, rb.drag), MathF.Max(0f, rb.angularDrag));
+        if (rb is not null)
+        {
+            entry.Body.SetDamping(MathF.Max(0f, rb.drag), MathF.Max(0f, rb.angularDrag));
+            // CCD sweeps the shape along its motion; without it a fast body can pass a wall
+            // between two steps. Only meaningful for dynamic bodies.
+            bool ccd = (rb.continuousCollisionDetection || continuousCollisionDetection) && dynamic;
+            entry.Body.CcdMotionThreshold = ccd ? MathF.Max(0.001f, rb.continuousCollisionDetectionThreshold) : 0f;
+            entry.Body.CcdSweptSphereRadius = ccd ? MathF.Max(0.01f, rb.collisionMargin) : 0f;
+            entry.Shape.Margin = MathF.Max(0.001f, rb.collisionMargin);
+        }
+        else
+        {
+            entry.Shape.Margin = MathF.Max(0.001f, collisionMargin);
+        }
 
         entry.LastSize = state.ColliderSize;
         entry.LastScale = state.Scale;
+        entry.LastCenter = state.ColliderCenter;
         entry.LastType = state.ColliderType;
         entry.LastTrigger = state.IsTrigger;
     }
@@ -326,15 +400,23 @@ public static class Physics
             if (!Bodies.TryGetValue(go.State.Id, out var entry)) continue;
 
             var native = go.State.Position;
-            if (Vector3.Distance(native, entry.Shadow) < 1e-4f) continue;
+            var nativeRotation = go.State.Rotation;
 
-            var transform = ComposeTransform(native, go.State.Rotation);
+            // The native side echoes back whatever the solver last published, so any difference
+            // is a genuine editor drag, gizmo rotation or script teleport. Position and rotation
+            // are checked separately: a rotate-only edit must still reach the body.
+            bool moved = Vector3.Distance(native, entry.Shadow) >= 1e-4f;
+            bool rotated = Vector3.Distance(nativeRotation, entry.LastRotation) >= 1e-3f;
+            if (!moved && !rotated) continue;
+
+            var transform = ComposeTransform(native, nativeRotation);
             if (entry.Trigger) entry.Ghost!.WorldTransform = transform;
             entry.Motion.WorldTransform = transform;
             entry.Body.WorldTransform = transform;
             entry.Body.InterpolationWorldTransform = transform;
             entry.Body.Activate(true);
             entry.Shadow = native;
+            entry.LastRotation = nativeRotation;
         }
     }
 
@@ -351,6 +433,9 @@ public static class Physics
             if (transform.Decompose(out BV3 _, out BQ rotation, out BV3 _))
                 go.State.Rotation = QuaternionToEuler(rotation);
             entry.Shadow = position;
+            // Keep the rotation shadow current so the next PushExternalMoves only reacts to
+            // genuine external edits, not to the solver's own output echoing back.
+            entry.LastRotation = go.State.Rotation;
         }
     }
 
@@ -443,7 +528,12 @@ public static class Physics
             foreach (var body in go.GetComponents<Rigidbody>()) body.Simulate(fixedDeltaTime);
         }
 
-        _world!.StepSimulation(fixedDeltaTime, 1, fixedDeltaTime);
+        // Substepping keeps fast objects from skipping through thin geometry. The native
+        // step length is capped so a long frame cannot let a body jump a wall.
+        int subSteps = Math.Clamp(maxSubSteps, 1, 16);
+        float step = MathF.Max(fixedTimeStep, 1e-4f);
+        if (subSteps > 1 && fixedDeltaTime > step * 1.5f) subSteps = (int)MathF.Min(subSteps, MathF.Ceiling(fixedDeltaTime / step) + 1);
+        _world!.StepSimulation(fixedDeltaTime, subSteps, step);
 
         PublishTransforms();
         DispatchContacts();
@@ -529,6 +619,24 @@ public static class Physics
         var angular = body.AngularVelocity;
         body.LinearVelocity = new BV3(freezeX ? 0f : linear.X, freezeY ? 0f : linear.Y, freezeZ ? 0f : linear.Z);
         body.AngularVelocity = new BV3(freezeRotX ? 0f : angular.X, freezeRotY ? 0f : angular.Y, freezeRotZ ? 0f : angular.Z);
+    }
+
+    /// <summary>Caps how fast a body may spin, in degrees per second.</summary>
+    internal static void ClampAngularVelocity(int id, float maxDegreesPerSecond)
+    {
+        if (!TryGetBody(id, out var body)) return;
+        var angular = body.AngularVelocity;
+        float radiansPerSecond = maxDegreesPerSecond * MathF.PI / 180f;
+        float speed = angular.Length;
+        if (speed > radiansPerSecond && speed > 1e-6f)
+            body.AngularVelocity = angular * (radiansPerSecond / speed);
+    }
+
+    internal static void SetInterpolation(int id, bool enable)
+    {
+        if (!TryGetBody(id, out var body)) return;
+        body.InterpolationWorldTransform = body.WorldTransform;
+        if (!enable) body.InterpolationLinearVelocity = BV3.Zero;
     }
 
     internal static void Sleep(int id) { if (TryGetBody(id, out var body)) body.ActivationState = ActivationState.IslandSleeping; }

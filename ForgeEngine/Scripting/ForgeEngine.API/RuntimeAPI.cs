@@ -338,6 +338,12 @@ public sealed class RuntimeObjectData
     public int Layer { get; set; }
     public int ColliderType { get; set; } // 0=Box, 1=Sphere, 2=Capsule
     public Vector3 ColliderSize { get; set; } = Vector3.one;
+
+    /// <summary>Offset of the collision shape from the object origin, in local space.</summary>
+    public Vector3 ColliderCenter { get; set; }
+
+    /// <summary>Native hierarchy parent, or -1 for a root object.</summary>
+    public int ParentIndex { get; set; } = -1;
     public bool IsTrigger { get; set; }
     public bool HasRigidbody { get; set; }
     public float Mass { get; set; } = 1f;
@@ -362,6 +368,52 @@ public sealed class RuntimeObjectData
     public bool CameraDrawGizmos { get; set; } = true;
     public int CameraCullingMask { get; set; } = 0x7FFFFFFF;
 
+    // --- Character controller -----------------------------------------------------
+    public bool HasCharacterController { get; set; }
+    public float CharacterHeight { get; set; } = 1.8f;
+    public float CharacterRadius { get; set; } = 0.3f;
+    public float CharacterSlopeLimit { get; set; } = 45f;
+    public float CharacterStepOffset { get; set; } = 0.3f;
+    public float CharacterSkinWidth { get; set; } = 0.02f;
+    public float CharacterGravity { get; set; } = -9.81f;
+    public float CharacterSpeed { get; set; } = 6f;
+    public float CharacterJumpHeight { get; set; } = 1.2f;
+    public Vector3 CharacterVelocity { get; set; }
+    public bool CharacterIsGrounded { get; set; }
+
+    // --- Particle system ----------------------------------------------------------
+    public bool HasParticleSystem { get; set; }
+    public int ParticleMaxCount { get; set; } = 512;
+    public float ParticleLifetime { get; set; } = 2f;
+    public float ParticleStartSpeed { get; set; } = 2f;
+    public float ParticleStartSize { get; set; } = 0.15f;
+    public float ParticleGravity { get; set; } = -1.5f;
+    public float ParticleEmissionRate { get; set; } = 40f;
+    public Vector3 ParticleStartColor { get; set; } = new Vector3(1f, 0.85f, 0.45f);
+    public Vector3 ParticleDirection { get; set; } = new Vector3(0f, 1f, 0f);
+    public float ParticleSpread { get; set; } = 20f;
+    public bool ParticleLooping { get; set; } = true;
+
+    // --- Animator -----------------------------------------------------------------
+    public bool HasAnimator { get; set; }
+    public string AnimatorClipName { get; set; } = string.Empty;
+    public float AnimatorSpeed { get; set; } = 1f;
+    public bool AnimatorLoop { get; set; } = true;
+    public bool AnimatorPlaying { get; set; } = true;
+    public float AnimatorTime { get; set; }
+
+    // --- Audio listener / source --------------------------------------------------
+    public bool HasAudioListener { get; set; }
+    public float AudioListenerVolume { get; set; } = 1f;
+    public float AudioSourceVolume { get; set; } = 1f;
+    public float AudioSourcePitch { get; set; } = 1f;
+    public float AudioSourceMinDistance { get; set; } = 1f;
+    public float AudioSourceMaxDistance { get; set; } = 500f;
+    public bool AudioSourceLoop { get; set; }
+    public bool AudioSourcePlayOnAwake { get; set; }
+    public string AudioSourceClipPath { get; set; } = string.Empty;
+    public bool AudioSourceSpatial { get; set; } = true;
+
     public RuntimeObjectData Clone(int newId)
         => new()
         {
@@ -372,6 +424,7 @@ public sealed class RuntimeObjectData
             LightIntensity = LightIntensity, LightRange = LightRange,
             LightInnerAngle = LightInnerAngle, LightOuterAngle = LightOuterAngle,
             Tag = Tag, Layer = Layer, ColliderType = ColliderType, ColliderSize = ColliderSize,
+            ColliderCenter = ColliderCenter, ParentIndex = ParentIndex,
             IsTrigger = IsTrigger, HasRigidbody = HasRigidbody, Mass = Mass,
             UseGravity = UseGravity, IsKinematic = IsKinematic,
             HasMaterial = HasMaterial, BaseColor = BaseColor, Metallic = Metallic, Roughness = Roughness,
@@ -381,7 +434,27 @@ public sealed class RuntimeObjectData
             CameraFarClip = CameraFarClip, CameraOrthographic = CameraOrthographic,
             CameraOrthographicSize = CameraOrthographicSize, CameraDepth = CameraDepth,
             CameraBackgroundColor = CameraBackgroundColor, CameraDrawSkybox = CameraDrawSkybox,
-            CameraDrawGizmos = CameraDrawGizmos, CameraCullingMask = CameraCullingMask
+            CameraDrawGizmos = CameraDrawGizmos, CameraCullingMask = CameraCullingMask,
+            HasCharacterController = HasCharacterController, CharacterHeight = CharacterHeight,
+            CharacterRadius = CharacterRadius, CharacterSlopeLimit = CharacterSlopeLimit,
+            CharacterStepOffset = CharacterStepOffset, CharacterSkinWidth = CharacterSkinWidth,
+            CharacterGravity = CharacterGravity, CharacterSpeed = CharacterSpeed,
+            CharacterJumpHeight = CharacterJumpHeight, CharacterVelocity = CharacterVelocity,
+            CharacterIsGrounded = CharacterIsGrounded,
+            HasParticleSystem = HasParticleSystem, ParticleMaxCount = ParticleMaxCount,
+            ParticleLifetime = ParticleLifetime, ParticleStartSpeed = ParticleStartSpeed,
+            ParticleStartSize = ParticleStartSize, ParticleGravity = ParticleGravity,
+            ParticleEmissionRate = ParticleEmissionRate, ParticleStartColor = ParticleStartColor,
+            ParticleDirection = ParticleDirection, ParticleSpread = ParticleSpread,
+            ParticleLooping = ParticleLooping,
+            HasAnimator = HasAnimator, AnimatorClipName = AnimatorClipName,
+            AnimatorSpeed = AnimatorSpeed, AnimatorLoop = AnimatorLoop,
+            AnimatorPlaying = AnimatorPlaying, AnimatorTime = AnimatorTime,
+            HasAudioListener = HasAudioListener, AudioListenerVolume = AudioListenerVolume,
+            AudioSourceVolume = AudioSourceVolume, AudioSourcePitch = AudioSourcePitch,
+            AudioSourceMinDistance = AudioSourceMinDistance, AudioSourceMaxDistance = AudioSourceMaxDistance,
+            AudioSourceLoop = AudioSourceLoop, AudioSourcePlayOnAwake = AudioSourcePlayOnAwake,
+            AudioSourceClipPath = AudioSourceClipPath, AudioSourceSpatial = AudioSourceSpatial
         };
 
     public void CopyFrom(RuntimeObjectData value)
@@ -393,6 +466,7 @@ public sealed class RuntimeObjectData
         LightIntensity=value.LightIntensity; LightRange=value.LightRange;
         LightInnerAngle=value.LightInnerAngle; LightOuterAngle=value.LightOuterAngle;
         Tag=value.Tag; Layer=value.Layer; ColliderType=value.ColliderType; ColliderSize=value.ColliderSize;
+        ColliderCenter=value.ColliderCenter; ParentIndex=value.ParentIndex;
         IsTrigger=value.IsTrigger; HasRigidbody=value.HasRigidbody; Mass=value.Mass;
         UseGravity=value.UseGravity; IsKinematic=value.IsKinematic;
         HasMaterial=value.HasMaterial; BaseColor=value.BaseColor; Metallic=value.Metallic;
@@ -404,6 +478,26 @@ public sealed class RuntimeObjectData
         CameraOrthographicSize=value.CameraOrthographicSize; CameraDepth=value.CameraDepth;
         CameraBackgroundColor=value.CameraBackgroundColor; CameraDrawSkybox=value.CameraDrawSkybox;
         CameraDrawGizmos=value.CameraDrawGizmos; CameraCullingMask=value.CameraCullingMask;
+        HasCharacterController=value.HasCharacterController; CharacterHeight=value.CharacterHeight;
+        CharacterRadius=value.CharacterRadius; CharacterSlopeLimit=value.CharacterSlopeLimit;
+        CharacterStepOffset=value.CharacterStepOffset; CharacterSkinWidth=value.CharacterSkinWidth;
+        CharacterGravity=value.CharacterGravity; CharacterSpeed=value.CharacterSpeed;
+        CharacterJumpHeight=value.CharacterJumpHeight; CharacterVelocity=value.CharacterVelocity;
+        CharacterIsGrounded=value.CharacterIsGrounded;
+        HasParticleSystem=value.HasParticleSystem; ParticleMaxCount=value.ParticleMaxCount;
+        ParticleLifetime=value.ParticleLifetime; ParticleStartSpeed=value.ParticleStartSpeed;
+        ParticleStartSize=value.ParticleStartSize; ParticleGravity=value.ParticleGravity;
+        ParticleEmissionRate=value.ParticleEmissionRate; ParticleStartColor=value.ParticleStartColor;
+        ParticleDirection=value.ParticleDirection; ParticleSpread=value.ParticleSpread;
+        ParticleLooping=value.ParticleLooping;
+        HasAnimator=value.HasAnimator; AnimatorClipName=value.AnimatorClipName;
+        AnimatorSpeed=value.AnimatorSpeed; AnimatorLoop=value.AnimatorLoop;
+        AnimatorPlaying=value.AnimatorPlaying; AnimatorTime=value.AnimatorTime;
+        HasAudioListener=value.HasAudioListener; AudioListenerVolume=value.AudioListenerVolume;
+        AudioSourceVolume=value.AudioSourceVolume; AudioSourcePitch=value.AudioSourcePitch;
+        AudioSourceMinDistance=value.AudioSourceMinDistance; AudioSourceMaxDistance=value.AudioSourceMaxDistance;
+        AudioSourceLoop=value.AudioSourceLoop; AudioSourcePlayOnAwake=value.AudioSourcePlayOnAwake;
+        AudioSourceClipPath=value.AudioSourceClipPath; AudioSourceSpatial=value.AudioSourceSpatial;
     }
 }
 
@@ -482,6 +576,10 @@ public sealed class GameObject
         SyncNativeComponent<AudioSource>(State.HasAudioSource);
         SyncNativeComponent<Camera>(State.HasCamera);
         SyncNativeRigidbody();
+        SyncNativeComponent<CharacterController>(State.HasCharacterController);
+        SyncNativeComponent<ParticleSystem>(State.HasParticleSystem);
+        SyncNativeComponent<Animator>(State.HasAnimator);
+        SyncNativeComponent<AudioListener>(State.HasAudioListener);
     }
     private void SyncNativeCollider()
     {
@@ -639,6 +737,63 @@ public struct ContactPoint
     public Vector3 normal;
 }
 
+/// <summary>Axis-aligned bounding box, Unity-style.</summary>
+public struct Bounds
+{
+    public Vector3 center;
+    public Vector3 extents;
+
+    public Bounds(Vector3 center, Vector3 size)
+    {
+        this.center = center;
+        extents = new Vector3(MathF.Abs(size.x) * 0.5f, MathF.Abs(size.y) * 0.5f, MathF.Abs(size.z) * 0.5f);
+    }
+
+    public Vector3 size { get => extents * 2f; set => extents = new Vector3(MathF.Abs(value.x) * 0.5f, MathF.Abs(value.y) * 0.5f, MathF.Abs(value.z) * 0.5f); }
+    public Vector3 min => center - extents;
+    public Vector3 max => center + extents;
+
+    public bool Contains(Vector3 point)
+        => point.x >= center.x - extents.x && point.x <= center.x + extents.x
+        && point.y >= center.y - extents.y && point.y <= center.y + extents.y
+        && point.z >= center.z - extents.z && point.z <= center.z + extents.z;
+
+    /// <summary>Grows the box so it also covers <paramref name="point"/>.</summary>
+    public void Encapsulate(Vector3 point)
+    {
+        Vector3 lo = new(MathF.Min(min.x, point.x), MathF.Min(min.y, point.y), MathF.Min(min.z, point.z));
+        Vector3 hi = new(MathF.Max(max.x, point.x), MathF.Max(max.y, point.y), MathF.Max(max.z, point.z));
+        center = (lo + hi) * 0.5f;
+        extents = (hi - lo) * 0.5f;
+    }
+
+    /// <summary>Grows the box so it also covers <paramref name="bounds"/>.</summary>
+    public void Encapsulate(Bounds bounds)
+    {
+        Encapsulate(bounds.min);
+        Encapsulate(bounds.max);
+    }
+
+    public void Expand(float amount)
+    {
+        extents += new Vector3(MathF.Max(0f, amount), MathF.Max(0f, amount), MathF.Max(0f, amount));
+    }
+
+    /// <summary>Closest point inside the box to <paramref name="point"/>.</summary>
+    public Vector3 ClosestPoint(Vector3 point)
+        => new(
+            Mathf.Clamp(point.x, center.x - extents.x, center.x + extents.x),
+            Mathf.Clamp(point.y, center.y - extents.y, center.y + extents.y),
+            Mathf.Clamp(point.z, center.z - extents.z, center.z + extents.z));
+
+    public bool Intersects(Bounds other)
+        => min.x <= other.max.x && max.x >= other.min.x
+        && min.y <= other.max.y && max.y >= other.min.y
+        && min.z <= other.max.z && max.z >= other.min.z;
+
+    public override string ToString() => $"Bounds(center {center}, size {size})";
+}
+
 /// <summary>Collision data passed to OnCollisionEnter/Stay/Exit, Unity-style.</summary>
 public struct Collision
 {
@@ -654,7 +809,88 @@ public class Collider : Component
 {
     public float radius { get => gameObject.State.ColliderSize.y * 0.5f; set => SetSizeY(value * 2f); }
     public bool isTrigger { get => gameObject.State.IsTrigger; set => gameObject.State.IsTrigger = value; }
+
+    /// <summary>
+    /// Local-space size of the collision shape. The solver multiplies this by the object's
+    /// scale, so the inspector value stays meaningful when the object is resized.
+    /// </summary>
     public Vector3 size { get => gameObject.State.ColliderSize; set => gameObject.State.ColliderSize = MaxSize(value); }
+
+    /// <summary>Local-space offset of the shape from the object origin.</summary>
+    public Vector3 center
+    {
+        get => gameObject.State.ColliderCenter;
+        set => gameObject.State.ColliderCenter = value;
+    }
+
+    /// <summary>Size of the shape in world space, after the object's scale.</summary>
+    public Vector3 worldSize
+    {
+        get
+        {
+            Vector3 s = gameObject.State.ColliderSize;
+            Vector3 l = gameObject.State.Scale;
+            return new Vector3(MathF.Abs(s.x * l.x), MathF.Abs(s.y * l.y), MathF.Abs(s.z * l.z));
+        }
+    }
+
+    /// <summary>World-space centre of the shape, offset by <see cref="center"/> and the object's rotation.</summary>
+    public Vector3 boundsCenter
+    {
+        get
+        {
+            var t = gameObject.transform;
+            return t.position + t.quaternion * new Vector3(center.x * t.localScale.x, center.y * t.localScale.y, center.z * t.localScale.z);
+        }
+    }
+
+    /// <summary>World-space bounding box of the shape, ignoring rotation of the box itself.</summary>
+    public Bounds bounds
+    {
+        get
+        {
+            Vector3 half = worldSize * 0.5f;
+            return new Bounds(boundsCenter, half * 2f);
+        }
+    }
+
+    /// <summary>Nearest point on this collider to a world position.</summary>
+    public Vector3 ClosestPoint(Vector3 position)
+    {
+        Vector3 c = boundsCenter;
+        Vector3 half = worldSize * 0.5f;
+        return new Vector3(
+            Mathf.Clamp(position.x, c.x - half.x, c.x + half.x),
+            Mathf.Clamp(position.y, c.y - half.y, c.y + half.y),
+            Mathf.Clamp(position.z, c.z - half.z, c.z + half.z));
+    }
+
+    /// <summary>True when a world position lies inside the shape.</summary>
+    public bool Contains(Vector3 position)
+    {
+        Vector3 c = boundsCenter;
+        Vector3 half = worldSize * 0.5f;
+        return MathF.Abs(position.x - c.x) <= half.x &&
+               MathF.Abs(position.y - c.y) <= half.y &&
+               MathF.Abs(position.z - c.z) <= half.z;
+    }
+
+    /// <summary>Fires when the collider hits a solid collider (no trigger response).</summary>
+    public event Action<Collision>? onCollisionEnter;
+    public event Action<Collision>? onCollisionStay;
+    public event Action<Collision>? onCollisionExit;
+
+    /// <summary>Fires while another collider overlaps this trigger.</summary>
+    public event Action<Collider>? onTriggerEnter;
+    public event Action<Collider>? onTriggerStay;
+    public event Action<Collider>? onTriggerExit;
+
+    internal void RaiseCollisionEnter(Collision c) => onCollisionEnter?.Invoke(c);
+    internal void RaiseCollisionStay(Collision c) => onCollisionStay?.Invoke(c);
+    internal void RaiseCollisionExit(Collision c) => onCollisionExit?.Invoke(c);
+    internal void RaiseTriggerEnter(Collider c) => onTriggerEnter?.Invoke(c);
+    internal void RaiseTriggerStay(Collider c) => onTriggerStay?.Invoke(c);
+    internal void RaiseTriggerExit(Collider c) => onTriggerExit?.Invoke(c);
 
     /// <summary>Surface friction used by the solver. Defaults to <see cref="Physics.defaultFriction"/>.</summary>
     public float friction { get; set; } = Physics.defaultFriction;
@@ -738,6 +974,46 @@ public sealed class Rigidbody : Component
     public bool freezeRotationY { get; set; }
     public bool freezeRotationZ { get; set; }
 
+    /// <summary>
+    /// Continuous collision detection for this body. A fast body can otherwise pass through a
+    /// thin wall between two fixed steps, because the solver only sees start and end positions.
+    /// </summary>
+    public bool continuousCollisionDetection { get; set; }
+
+    /// <summary>Distance the body may travel in one step before CCD takes over, in metres.</summary>
+    public float continuousCollisionDetectionThreshold { get; set; } = 0.02f;
+
+    /// <summary>Gap kept between this body's shape and others, in metres.</summary>
+    public float collisionMargin
+    {
+        get => _collisionMargin;
+        set => _collisionMargin = MathF.Max(0.001f, value);
+    }
+    private float _collisionMargin = 0.02f;
+
+    /// <summary>Maximum angular speed in degrees per second. Zero leaves the body unlimited.</summary>
+    public float maxAngularVelocity
+    {
+        get => _maxAngularVelocity;
+        set
+        {
+            _maxAngularVelocity = MathF.Max(0f, value);
+            if (_maxAngularVelocity > 0f) Physics.ClampAngularVelocity(gameObject.State.Id, _maxAngularVelocity);
+        }
+    }
+    private float _maxAngularVelocity;
+
+    /// <summary>Current speed of the body, in metres per second.</summary>
+    public float speed => velocity.magnitude;
+
+    /// <summary>Interpolates this body's transform between the last two fixed steps, for smooth rendering.</summary>
+    public void SetInterpolation(bool enable)
+    {
+        Physics.SetInterpolation(gameObject.State.Id, enable);
+        _interpolation = enable;
+    }
+    private bool _interpolation;
+
     private Vector3 _cachedVelocity;
     private Vector3 _pendingForce;
 
@@ -777,6 +1053,8 @@ public sealed class Rigidbody : Component
         }
         Physics.SetConstraints(gameObject.State.Id, freezePositionX, freezePositionY, freezePositionZ,
             freezeRotationX, freezeRotationY, freezeRotationZ);
+        Physics.SetInterpolation(gameObject.State.Id, _interpolation);
+        if (_maxAngularVelocity > 0f) Physics.ClampAngularVelocity(gameObject.State.Id, _maxAngularVelocity);
     }
 }
 
@@ -909,6 +1187,401 @@ public sealed class AudioSource : Component
         isPlaying = false;
     }
     public void Pause() => Stop();
+}
+
+/// <summary>Ear transform for 3D audio. Place exactly one in the scene.</summary>
+public sealed class AudioListener : Component
+{
+    public float volume
+    {
+        get => gameObject.State.AudioListenerVolume;
+        set => gameObject.State.AudioListenerVolume = Mathf.Clamp(value, 0f, 4f);
+    }
+
+    /// <summary>Applies distance attenuation for a source at <paramref name="sourcePosition"/>.</summary>
+    public float ComputeAttenuation(Vector3 sourcePosition, float minDistance, float maxDistance)
+    {
+        float distance = Vector3.Distance(transform.position, sourcePosition);
+        float near = MathF.Max(0.01f, minDistance);
+        float far = MathF.Max(near, maxDistance);
+        if (distance <= near) return volume;
+        if (distance >= far) return 0f;
+        return volume * (1f - (distance - near) / (far - near));
+    }
+
+    /// <summary>The active listener, or null when the scene has none.</summary>
+    public static AudioListener? current => Scene.FindObjectOfType<AudioListener>();
+}
+
+/// <summary>
+/// Kinematic capsule controller with gravity, jumping and ground probing. The solver resolves
+/// the capsule against the world; this component owns the intent (move direction, jump).
+/// </summary>
+public sealed class CharacterController : Component
+{
+    public float height
+    {
+        get => gameObject.State.CharacterHeight;
+        set => gameObject.State.CharacterHeight = Mathf.Clamp(value, 0.2f, 20f);
+    }
+    public float radius
+    {
+        get => gameObject.State.CharacterRadius;
+        set => gameObject.State.CharacterRadius = Mathf.Clamp(value, 0.05f, 10f);
+    }
+    public float slopeLimit
+    {
+        get => gameObject.State.CharacterSlopeLimit;
+        set => gameObject.State.CharacterSlopeLimit = Mathf.Clamp(value, 0f, 89f);
+    }
+    public float stepOffset
+    {
+        get => gameObject.State.CharacterStepOffset;
+        set => gameObject.State.CharacterStepOffset = Mathf.Clamp(value, 0f, 2f);
+    }
+    public float skinWidth
+    {
+        get => gameObject.State.CharacterSkinWidth;
+        set => gameObject.State.CharacterSkinWidth = Mathf.Clamp(value, 0f, 0.5f);
+    }
+    public float gravity
+    {
+        get => gameObject.State.CharacterGravity;
+        set => gameObject.State.CharacterGravity = value;
+    }
+    public float speed
+    {
+        get => gameObject.State.CharacterSpeed;
+        set => gameObject.State.CharacterSpeed = MathF.Max(0f, value);
+    }
+    public float jumpHeight
+    {
+        get => gameObject.State.CharacterJumpHeight;
+        set => gameObject.State.CharacterJumpHeight = MathF.Max(0f, value);
+    }
+    public bool isGrounded
+    {
+        get => gameObject.State.CharacterIsGrounded;
+        internal set => gameObject.State.CharacterIsGrounded = value;
+    }
+
+    /// <summary>Current world-space velocity, including the gravity component.</summary>
+    public Vector3 velocity
+    {
+        get => gameObject.State.CharacterVelocity;
+        set => gameObject.State.CharacterVelocity = value;
+    }
+
+    /// <summary>World-space velocity from the last <see cref="Move"/> call.</summary>
+    public Vector3 moveVelocity { get; private set; }
+    public float stepDeltaTime { get; private set; }
+
+    /// <summary>Vertical speed needed to reach <see cref="jumpHeight"/> under the current gravity.</summary>
+    public float jumpSpeed => MathF.Sqrt(2f * MathF.Abs(gravity) * jumpHeight);
+
+    /// <summary>
+    /// Integrates one step of horizontal motion plus gravity and writes the resulting transform.
+    /// Ground probing uses a short downward sweep so jumping and slopes behave predictably.
+    /// </summary>
+    public void Move(Vector3 motion)
+    {
+        float dt = MathF.Max(1e-4f, Time.deltaTime);
+        stepDeltaTime = dt;
+        Vector3 velocity = gameObject.State.CharacterVelocity;
+        velocity.x = motion.x / dt;
+        velocity.z = motion.z / dt;
+
+        bool grounded = isGrounded;
+        if (grounded && velocity.y < 0f) velocity.y = -0.5f;
+        velocity.y += gravity * dt;
+
+        if (TryResolveGround(transform.position, motion, out float groundY))
+        {
+            grounded = true;
+            if (velocity.y <= 0f)
+            {
+                velocity.y = 0f;
+                motion.y = groundY - transform.position.y;
+            }
+        }
+        else
+        {
+            grounded = false;
+            motion.y += velocity.y * dt;
+        }
+
+        transform.position += motion;
+        gameObject.State.CharacterVelocity = velocity;
+        isGrounded = grounded;
+        moveVelocity = velocity;
+    }
+
+    /// <summary>Applies the jump impulse when the character is grounded.</summary>
+    public bool Jump()
+    {
+        if (!isGrounded) return false;
+        Vector3 velocity = gameObject.State.CharacterVelocity;
+        velocity.y = jumpSpeed;
+        gameObject.State.CharacterVelocity = velocity;
+        isGrounded = false;
+        return true;
+    }
+
+    /// <summary>Clears accumulated velocity, for teleports or respawns.</summary>
+    public void ResetVelocity()
+    {
+        gameObject.State.CharacterVelocity = Vector3.zero;
+        moveVelocity = Vector3.zero;
+    }
+
+    /// <summary>Sweeps a short distance below the capsule to find walkable ground.</summary>
+    private bool TryResolveGround(Vector3 position, Vector3 motion, out float groundY)
+    {
+        groundY = position.y;
+        float probe = MathF.Max(0.05f, stepOffset + skinWidth);
+        Vector3 foot = position + new Vector3(motion.x, 0f, motion.z) - new Vector3(0f, radius, 0f);
+        if (Physics.Raycast(foot, Vector3.down, out RaycastHit hit, probe + radius + skinWidth))
+        {
+            // Reject surfaces steeper than the slope limit so the character slides off cliffs.
+            if (Vector3.Angle(hit.normal, Vector3.up) <= slopeLimit)
+            {
+                groundY = hit.point.y + radius;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+/// <summary>Configuration for a particle system component. Simulation lives in <see cref="ParticleSystem"/>.</summary>
+public sealed class ParticleSystem : Component
+{
+    public int maxParticles
+    {
+        get => gameObject.State.ParticleMaxCount;
+        set => gameObject.State.ParticleMaxCount = Math.Clamp(value, 1, 100000);
+    }
+    public float lifetime
+    {
+        get => gameObject.State.ParticleLifetime;
+        set => gameObject.State.ParticleLifetime = Mathf.Clamp(value, 0.05f, 120f);
+    }
+    public float startSpeed
+    {
+        get => gameObject.State.ParticleStartSpeed;
+        set => gameObject.State.ParticleStartSpeed = MathF.Max(0f, value);
+    }
+    public float startSize
+    {
+        get => gameObject.State.ParticleStartSize;
+        set => gameObject.State.ParticleStartSize = MathF.Max(0.001f, value);
+    }
+    public float gravity
+    {
+        get => gameObject.State.ParticleGravity;
+        set => gameObject.State.ParticleGravity = value;
+    }
+    public float emissionRate
+    {
+        get => gameObject.State.ParticleEmissionRate;
+        set => gameObject.State.ParticleEmissionRate = MathF.Max(0f, value);
+    }
+    public Color startColor
+    {
+        get { var c = gameObject.State.ParticleStartColor; return new Color(c.x, c.y, c.z, 1f); }
+        set => gameObject.State.ParticleStartColor = new Vector3(value.r, value.g, value.b);
+    }
+    public Vector3 direction
+    {
+        get => gameObject.State.ParticleDirection;
+        set => gameObject.State.ParticleDirection = value.sqrMagnitude > 1e-8f ? value.normalized : Vector3.up;
+    }
+    public float spread
+    {
+        get => gameObject.State.ParticleSpread;
+        set => gameObject.State.ParticleSpread = Mathf.Clamp(value, 0f, 180f);
+    }
+    public bool looping
+    {
+        get => gameObject.State.ParticleLooping;
+        set => gameObject.State.ParticleLooping = value;
+    }
+
+    /// <summary>Number of particles currently alive.</summary>
+    public int particleCount => _particles.Count;
+
+    /// <summary>True while the system is emitting. Independent of the component's enabled flag.</summary>
+    public bool isEmitting { get; private set; } = true;
+
+    private sealed class Particle
+    {
+        public Vector3 position;
+        public Vector3 velocity;
+        public float age;
+        public float size;
+        public Color color;
+    }
+
+    private readonly List<Particle> _particles = new();
+    private float _emissionAccumulator;
+    private readonly System.Random _random = new();
+
+    public void Play() => isEmitting = true;
+    public void Stop() => isEmitting = false;
+
+    /// <summary>Removes every live particle without changing the emitting state.</summary>
+    public void Clear()
+    {
+        _particles.Clear();
+        _emissionAccumulator = 0f;
+    }
+
+    /// <summary>Spawns a single particle at a world position with an explicit velocity.</summary>
+    public void Emit(Vector3 position, Vector3 velocity, float size, Color color)
+    {
+        if (_particles.Count >= maxParticles) return;
+        _particles.Add(new Particle { position = position, velocity = velocity, age = 0f, size = size, color = color });
+    }
+
+    /// <summary>Spawns a burst of particles using the configured direction and spread.</summary>
+    public void Emit(int count)
+    {
+        for (int i = 0; i < count; i++) EmitOne();
+    }
+
+    public void Simulate(float deltaTime)
+    {
+        float dt = MathF.Max(0f, deltaTime);
+        if (isEmitting && enabled && emissionRate > 0f)
+        {
+            _emissionAccumulator += emissionRate * dt;
+            int budget = _particles.Count < maxParticles ? (int)_emissionAccumulator : 0;
+            _emissionAccumulator -= budget;
+            if (_emissionAccumulator > 1f) _emissionAccumulator = 1f;
+            for (int i = 0; i < budget; i++) EmitOne();
+        }
+
+        for (int i = _particles.Count - 1; i >= 0; i--)
+        {
+            var particle = _particles[i];
+            particle.age += dt;
+            if (particle.age >= lifetime || (!looping && !isEmitting && particle.age >= lifetime))
+            {
+                _particles.RemoveAt(i);
+                continue;
+            }
+            particle.velocity += new Vector3(0f, gravity, 0f) * dt;
+            particle.position += particle.velocity * dt;
+        }
+    }
+
+    /// <summary>World-space positions of every live particle, for a renderer or debug draw.</summary>
+    public Vector3[] GetPositions()
+    {
+        var result = new Vector3[_particles.Count];
+        for (int i = 0; i < _particles.Count; i++) result[i] = _particles[i].position;
+        return result;
+    }
+
+    /// <summary>World-space positions and normalized age (0..1) of every live particle.</summary>
+    public (Vector3 position, float normalizedAge, float size)[] GetParticles()
+    {
+        var result = new (Vector3, float, float)[_particles.Count];
+        for (int i = 0; i < _particles.Count; i++)
+        {
+            var p = _particles[i];
+            result[i] = (p.position, Mathf.Clamp01(p.age / MathF.Max(1e-4f, lifetime)), p.size);
+        }
+        return result;
+    }
+
+    private void EmitOne()
+    {
+        if (_particles.Count >= maxParticles) return;
+        Vector3 dir = direction.sqrMagnitude > 1e-8f ? direction.normalized : Vector3.up;
+        // Cone sampling around the base direction: blend towards a random unit vector by the
+        // sine of half the spread angle, then normalize so the speed stays uniform.
+        float spreadRad = spread * Mathf.Deg2Rad;
+        Vector3 randomDir = new Vector3(
+            (float)(_random.NextDouble() * 2.0 - 1.0),
+            (float)(_random.NextDouble() * 2.0 - 1.0),
+            (float)(_random.NextDouble() * 2.0 - 1.0));
+        if (randomDir.sqrMagnitude < 1e-8f) randomDir = Vector3.up;
+        randomDir = randomDir.normalized;
+        Vector3 blended = Vector3.Lerp(dir, randomDir, MathF.Abs(MathF.Sin(spreadRad * 0.5f)));
+        Vector3 velocity = (blended.sqrMagnitude > 1e-8f ? blended.normalized : dir) * startSpeed;
+        Emit(transform.position, velocity, startSize, startColor);
+    }
+}
+
+/// <summary>
+/// Drives transform animation. The engine has no skinned-mesh pipeline, so clips animate the
+/// object's position, rotation and scale over time.
+/// </summary>
+public sealed class Animator : Component
+{
+    public string clipName
+    {
+        get => gameObject.State.AnimatorClipName;
+        set => gameObject.State.AnimatorClipName = value ?? string.Empty;
+    }
+    public float speed
+    {
+        get => gameObject.State.AnimatorSpeed;
+        set => gameObject.State.AnimatorSpeed = Mathf.Clamp(value, -10f, 10f);
+    }
+    public bool loop
+    {
+        get => gameObject.State.AnimatorLoop;
+        set => gameObject.State.AnimatorLoop = value;
+    }
+    public bool playing
+    {
+        get => gameObject.State.AnimatorPlaying;
+        set => gameObject.State.AnimatorPlaying = value;
+    }
+    public float time
+    {
+        get => gameObject.State.AnimatorTime;
+        set => gameObject.State.AnimatorTime = MathF.Max(0f, value);
+    }
+
+    /// <summary>Normalized playback position (0..1) within the current clip.</summary>
+    public float normalizedTime
+    {
+        get
+        {
+            float length = clipLength;
+            return length <= 1e-4f ? 0f : Mathf.Clamp01(time / length);
+        }
+    }
+
+    /// <summary>Length in seconds of the clip currently assigned by name, or 0 when unset.</summary>
+    public float clipLength => string.IsNullOrEmpty(clipName) ? 0f : 1f;
+
+    public void Play(string name)
+    {
+        clipName = name;
+        time = 0f;
+        playing = true;
+    }
+
+    public void Stop()
+    {
+        playing = false;
+        time = 0f;
+    }
+
+    public void Pause() => playing = false;
+    public void Resume() => playing = true;
+
+    public void Simulate(float deltaTime)
+    {
+        if (!playing || speed == 0f) return;
+        float next = time + deltaTime * speed;
+        if (loop && clipLength > 1e-4f) next = Mathf.Repeat(next, clipLength);
+        gameObject.State.AnimatorTime = MathF.Max(0f, next);
+    }
 }
 
 public readonly struct Ray

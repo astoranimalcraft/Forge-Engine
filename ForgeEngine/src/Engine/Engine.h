@@ -175,6 +175,8 @@ private:
         bool hasCollider = false;
         int colliderType = 0; // 0=Box, 1=Sphere, 2=Capsule
         XMFLOAT3 colliderSize{ 1.0f, 1.0f, 1.0f };
+        // Offset of the collision shape from the object origin, in local space.
+        XMFLOAT3 colliderCenter{ 0.0f, 0.0f, 0.0f };
         bool isTrigger = false;
         bool hasRigidbody = false;
         float rigidbodyMass = 1.0f;
@@ -182,6 +184,57 @@ private:
         bool rigidbodyIsKinematic = false;
         bool hasAudioSource = false;
         bool hasScript = false;
+
+        // --- Character controller -------------------------------------------------
+        // Kinematic capsule driven by the script/editor layer; the solver only resolves
+        // its collisions, so slope/step handling stays deterministic.
+        bool hasCharacterController = false;
+        float characterHeight = 1.8f;
+        float characterRadius = 0.3f;
+        float characterSlopeLimit = 45.0f;
+        float characterStepOffset = 0.3f;
+        float characterSkinWidth = 0.02f;
+        float characterGravity = -9.81f;
+        float characterSpeed = 6.0f;
+        float characterJumpHeight = 1.2f;
+        XMFLOAT3 characterVelocity{ 0.0f, 0.0f, 0.0f };
+        bool characterIsGrounded = false;
+
+        // --- Particle system ------------------------------------------------------
+        bool hasParticleSystem = false;
+        int particleMaxCount = 512;
+        float particleLifetime = 2.0f;
+        float particleStartSpeed = 2.0f;
+        float particleStartSize = 0.15f;
+        float particleGravity = -1.5f;
+        float particleEmissionRate = 40.0f;
+        XMFLOAT3 particleStartColor{ 1.0f, 0.85f, 0.45f };
+        XMFLOAT3 particleDirection{ 0.0f, 1.0f, 0.0f };
+        float particleSpread = 20.0f;
+        bool particleLooping = true;
+
+        // --- Animator -------------------------------------------------------------
+        // The engine has no skinned-mesh pipeline, so this drives transform animation
+        // clips (position/rotation/scale keys) applied to this object at runtime.
+        bool hasAnimator = false;
+        std::string animatorClipName;
+        float animatorSpeed = 1.0f;
+        bool animatorLoop = true;
+        bool animatorPlaying = true;
+        float animatorTime = 0.0f;
+
+        // --- Audio listener -------------------------------------------------------
+        // Exactly one object should own the listener; it defines the ear transform.
+        bool hasAudioListener = false;
+        float audioListenerVolume = 1.0f;
+        float audioSourceVolume = 1.0f;
+        float audioSourcePitch = 1.0f;
+        float audioSourceMinDistance = 1.0f;
+        float audioSourceMaxDistance = 500.0f;
+        bool audioSourceLoop = false;
+        bool audioSourcePlayOnAwake = false;
+        std::string audioSourceClipPath;
+        bool audioSourceSpatial = true;
         std::vector<ScriptComponentData> scriptComponents;
         std::string importedModelPath;
         std::string albedoTexturePath;

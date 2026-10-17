@@ -266,7 +266,23 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
          <<o.cameraFieldOfView<<'|'<<o.cameraNearClip<<'|'<<o.cameraFarClip<<'|'<<(o.cameraOrthographic?1:0)<<'|'
          <<o.cameraOrthographicSize<<'|'<<o.cameraDepth<<'|'
          <<o.cameraBackgroundColor.x<<'|'<<o.cameraBackgroundColor.y<<'|'<<o.cameraBackgroundColor.z<<'|'<<o.cameraBackgroundColor.w<<'|'
-         <<(o.cameraDrawSkybox?1:0)<<'|'<<(o.cameraDrawGizmos?1:0)<<'|'<<o.cameraCullingMask<<'\n';
+         <<(o.cameraDrawSkybox?1:0)<<'|'<<(o.cameraDrawGizmos?1:0)<<'|'<<o.cameraCullingMask<<'|'
+         <<o.colliderCenter.x<<'|'<<o.colliderCenter.y<<'|'<<o.colliderCenter.z<<'|'<<o.parentIndex<<'|'
+         <<(o.hasCharacterController?1:0)<<'|'<<o.characterHeight<<'|'<<o.characterRadius<<'|'<<o.characterSlopeLimit<<'|'
+         <<o.characterStepOffset<<'|'<<o.characterSkinWidth<<'|'<<o.characterGravity<<'|'<<o.characterSpeed<<'|'
+         <<o.characterJumpHeight<<'|'<<o.characterVelocity.x<<'|'<<o.characterVelocity.y<<'|'<<o.characterVelocity.z<<'|'
+         <<(o.characterIsGrounded?1:0)<<'|'
+         <<(o.hasParticleSystem?1:0)<<'|'<<o.particleMaxCount<<'|'<<o.particleLifetime<<'|'<<o.particleStartSpeed<<'|'
+         <<o.particleStartSize<<'|'<<o.particleGravity<<'|'<<o.particleEmissionRate<<'|'
+         <<o.particleStartColor.x<<'|'<<o.particleStartColor.y<<'|'<<o.particleStartColor.z<<'|'
+         <<o.particleDirection.x<<'|'<<o.particleDirection.y<<'|'<<o.particleDirection.z<<'|'
+         <<o.particleSpread<<'|'<<(o.particleLooping?1:0)<<'|'
+         <<(o.hasAnimator?1:0)<<'|'<<Base64Encode(o.animatorClipName)<<'|'<<o.animatorSpeed<<'|'
+         <<(o.animatorLoop?1:0)<<'|'<<(o.animatorPlaying?1:0)<<'|'<<o.animatorTime<<'|'
+         <<(o.hasAudioListener?1:0)<<'|'<<o.audioListenerVolume<<'|'
+         <<o.audioSourceVolume<<'|'<<o.audioSourcePitch<<'|'<<o.audioSourceMinDistance<<'|'<<o.audioSourceMaxDistance<<'|'
+         <<(o.audioSourceLoop?1:0)<<'|'<<(o.audioSourcePlayOnAwake?1:0)<<'|'
+         <<Base64Encode(o.audioSourceClipPath)<<'|'<<(o.audioSourceSpatial?1:0)<<'\n';
         for(const auto& s:o.scripts)out<<"SCRIPT|"<<o.id<<'|'<<s.className<<'|'<<(s.enabled?1:0)<<'\n';}
     out<<"END\n";if(!SendText(out.str())){logs.push_back("ERROR: Lost connection to the C# script host.");Stop();return false;}
     bool gotEnd=false;const ULONGLONG deadline=GetTickCount64()+3000;std::map<int,ForgeScriptObjectState*> byId;for(auto& o:objects)byId[o.id]=&o;
@@ -327,6 +343,50 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
                 o.cameraDrawSkybox=ToInt(p[52],o.cameraDrawSkybox?1:0)!=0;
                 o.cameraDrawGizmos=ToInt(p[53],o.cameraDrawGizmos?1:0)!=0;
                 o.cameraCullingMask=ToInt(p[54],o.cameraCullingMask);
+            }
+            if(p.size()>=59){
+                o.colliderCenter={ToFloat(p[55],o.colliderCenter.x),ToFloat(p[56],o.colliderCenter.y),ToFloat(p[57],o.colliderCenter.z)};
+                o.parentIndex=ToInt(p[58],o.parentIndex);
+            }
+            if(p.size()>=103){
+                o.hasCharacterController=ToInt(p[59],o.hasCharacterController?1:0)!=0;
+                o.characterHeight=ToFloat(p[60],o.characterHeight);
+                o.characterRadius=ToFloat(p[61],o.characterRadius);
+                o.characterSlopeLimit=ToFloat(p[62],o.characterSlopeLimit);
+                o.characterStepOffset=ToFloat(p[63],o.characterStepOffset);
+                o.characterSkinWidth=ToFloat(p[64],o.characterSkinWidth);
+                o.characterGravity=ToFloat(p[65],o.characterGravity);
+                o.characterSpeed=ToFloat(p[66],o.characterSpeed);
+                o.characterJumpHeight=ToFloat(p[67],o.characterJumpHeight);
+                o.characterVelocity={ToFloat(p[68],o.characterVelocity.x),ToFloat(p[69],o.characterVelocity.y),ToFloat(p[70],o.characterVelocity.z)};
+                o.characterIsGrounded=ToInt(p[71],o.characterIsGrounded?1:0)!=0;
+                o.hasParticleSystem=ToInt(p[72],o.hasParticleSystem?1:0)!=0;
+                o.particleMaxCount=ToInt(p[73],o.particleMaxCount);
+                o.particleLifetime=ToFloat(p[74],o.particleLifetime);
+                o.particleStartSpeed=ToFloat(p[75],o.particleStartSpeed);
+                o.particleStartSize=ToFloat(p[76],o.particleStartSize);
+                o.particleGravity=ToFloat(p[77],o.particleGravity);
+                o.particleEmissionRate=ToFloat(p[78],o.particleEmissionRate);
+                o.particleStartColor={ToFloat(p[79],o.particleStartColor.x),ToFloat(p[80],o.particleStartColor.y),ToFloat(p[81],o.particleStartColor.z)};
+                o.particleDirection={ToFloat(p[82],o.particleDirection.x),ToFloat(p[83],o.particleDirection.y),ToFloat(p[84],o.particleDirection.z)};
+                o.particleSpread=ToFloat(p[85],o.particleSpread);
+                o.particleLooping=ToInt(p[86],o.particleLooping?1:0)!=0;
+                o.hasAnimator=ToInt(p[87],o.hasAnimator?1:0)!=0;
+                o.animatorClipName=Base64Decode(p[88]);
+                o.animatorSpeed=ToFloat(p[89],o.animatorSpeed);
+                o.animatorLoop=ToInt(p[90],o.animatorLoop?1:0)!=0;
+                o.animatorPlaying=ToInt(p[91],o.animatorPlaying?1:0)!=0;
+                o.animatorTime=ToFloat(p[92],o.animatorTime);
+                o.hasAudioListener=ToInt(p[93],o.hasAudioListener?1:0)!=0;
+                o.audioListenerVolume=ToFloat(p[94],o.audioListenerVolume);
+                o.audioSourceVolume=ToFloat(p[95],o.audioSourceVolume);
+                o.audioSourcePitch=ToFloat(p[96],o.audioSourcePitch);
+                o.audioSourceMinDistance=ToFloat(p[97],o.audioSourceMinDistance);
+                o.audioSourceMaxDistance=ToFloat(p[98],o.audioSourceMaxDistance);
+                o.audioSourceLoop=ToInt(p[99],o.audioSourceLoop?1:0)!=0;
+                o.audioSourcePlayOnAwake=ToInt(p[100],o.audioSourcePlayOnAwake?1:0)!=0;
+                o.audioSourceClipPath=Base64Decode(p[101]);
+                o.audioSourceSpatial=ToInt(p[102],o.audioSourceSpatial?1:0)!=0;
             }
         }else AppendHostLog(line,logs);
     }

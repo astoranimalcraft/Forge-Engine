@@ -119,8 +119,11 @@ collision model is sphere-only: `Rigidbody.Simulate` integrates gravity, drag an
 forces, and the ground plane is handled by clamping against `collider.effectiveRadius`.
 There is no native physics library and no general collision solver.
 
-`Scene` format versioning is handled by the `v8`/`v9` markers in the loader; keep
-older markers loadable when extending the format.
+`Scene` format versioning is handled by the version marker in the loader (currently
+`FORGEENGINE_SCENE 11`; the loader still accepts the legacy `DX12FORGE_SCENE`
+signature and versions 1..11). Keep older versions loadable when extending the format:
+each version's extra fields are appended in order and read behind a `if (version >= N)`
+guard, so a new version must only append.
 
 ### Building and testing the C# side on Linux
 
@@ -149,6 +152,63 @@ are appended to `OBJ` and guarded by length checks (`p.Length >= 26`, `>= 37`), 
 adding a field is backward compatible as long as the reader keeps its bounds check.
 `OBJ` field order must stay in sync between `ScriptRuntime.cpp` (writer) and
 `Program.cs` (reader).
+
+Three files must be edited together whenever a per-object field is added, and their
+token indices must agree exactly:
+
+- `ScriptRuntime.cpp` — the `OBJ` writer and the `SET` parser (native side)
+- `Program.cs` — the `OBJ` parser and the `SET` writer (C# host)
+- `ScriptRuntime.h` / `RuntimeAPI.cs` — the two `ForgeScriptObjectState` /
+  `RuntimeObjectData` field sets
+
+`OBJ` and `SET` do **not** share an index base. `OBJ` starts its payload at `p[3]`
+(`p[0]` is the literal `OBJ`, `p[1]` the id, `p[2]` the Base64 name); `SET` starts at
+`p[2]` and also omits `hasMeshRenderer`. The simplest way to keep them straight is to
+count the emit arguments directly rather than trusting a hand-written table, e.g. split
+the `Emit("SET", ...)` argument list on top-level commas. As of the v11 component
+block: `OBJ` has 109 tokens (`p[0]`..`p[108]`, components at `p[65]`..`p[108]`) and
+`SET` has 103 (`p[0]`..`p[102]`, components at `p[59]`..`p[102]`).
+
+`EditorUI.cpp` mirrors every field in both directions (`state.*` ↔ `object.*`) and
+serialises them to the scene file; a field added to only one direction will silently
+reset on the next script tick or scene save.
+
+### Cloud noise: avoid axis-aligned FBM
+
+`CloudFBM3D` in `Shaders.hlsl` multiplies the domain by an orthonormal matrix
+(`kCloudOctaveRotation`) between octaves. Without it, every octave's gradient-noise
+lattice shares the same axis directions, so the lattice spacing reinforces and the sky
+reads as a square grid. Do not remove the rotation, and keep the matrix orthonormal
+(determinant `+1`) so it rotates the lattice without stretching the noise.
+
+Measured on the axis-line share of spectral energy for the 5-octave field used by the
+cumulus deck (40x40 samples, step 0.06, Hann window): 42.1% without the rotation,
+18.2% with it. To reproduce, port `GradientNoise3D`/`CloudFBM3D`/`Hash33` to Python and
+compute the separable 2D DFT, then compare `sum(|F|^2)` on the `k==0 or l==0` lines
+against the total.
+
+### Component API surface
+
+`RuntimeAPI.cs` exposes one class per component, all deriving from `Component`. The
+built-in set is `Transform`, `MeshRenderer`, `Collider` (+`Box/Sphere/Capsule`),
+`Rigidbody`, `Camera`, `Light`, `AudioSource`, `AudioListener`, `CharacterController`,
+`ParticleSystem` and `Animator`. Adding a component means touching the same five
+places every time:
+
+1. `Engine.h` — the `GameObject` fields (a `hasX` flag plus its data)
+2. `EditorUI.cpp` — the Inspector panel, the `+ Add Component` menu entry, and both
+   directions of the state marshal
+3. `RuntimeAPI.cs` — the `RuntimeObjectData` fields, the `Component` subclass, and the
+   `Clone`/`CopyFrom` field lists
+4. `ScriptRuntime.h` / `RuntimeAPI.cs` + `ScriptRuntime.cpp` / `Program.cs` — the pipe
+   protocol, per the protocol section above
+5. `EditorUI.cpp` — the scene writer/reader, behind a new version guard
+
+`GameObject.AddComponent<T>()`/`GetComponent<T>()` work off a component list, and
+`GameObject.RefreshNativeComponents()` syncs the native `hasX` flags from the C# state.
+Components that need per-frame work (`ParticleSystem.Simulate`, `Animator.Simulate`)
+are ticked from `ProcessFrame` in `Program.cs` **after** the script `Update` calls, so a
+script can still drive them in the same frame.
 
 ### Physics: the Bullet solver
 
@@ -207,10 +267,10 @@ building a feature on top:
   scroll field, so the value never reaches the host. `Inputs.json` ships the axis anyway.
 - There is no `Cursor` class, so a script cannot lock or hide the pointer. Play mode does
   hide the cursor while the right mouse button is held.
-- There is no parent/child API in C#. `parentIndex` exists on the native object and the
-  editor draws the hierarchy, but `Transform.localPosition` is currently the same value as
-  `position` and `lossyScale` returns the local scale, so a child cannot be offset from or
-  follow its parent through scripts.
+- There is no parent/child API in C#. `parentIndex` exists on the native object, is carried
+  through the pipe protocol and the editor draws the hierarchy, but `Transform.localPosition`
+  is currently the same value as `position` and `lossyScale` returns the local scale, so a
+  child cannot be offset from or follow its parent through scripts.
 - `Time.fixedDeltaTime` is a hard-coded 0.02f; `Rigidbody.drag` and `angularDrag` are plain
   auto-properties that never reach Bullet.
 - `Input.GetAxis`/`GetAxisRaw` return 0 for any axis that is not in `Config/Inputs.json`,
