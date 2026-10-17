@@ -178,6 +178,13 @@ Ordering rules that are easy to get wrong, all verified against the real library
   broadphase.
 - `Scene.SyncObjects` must run before `Scene.Find`/`AddComponent` in tests; components
   added to an object the scene has not seen are dropped.
+- Every component that applies force or constraints must be ticked from
+  `SimulateRuntimeStep` **before** `StepSimulation`. `Rigidbody.Simulate` was written but
+  never called, which silently made `AddForce` and every freeze flag dead code. If you add
+  a component that mutates a body, wire its tick in there too.
+- `LinearFactor`/`AngularFactor` only scale applied force, torque and gravity. They do
+  **not** mask a velocity a script assigns directly, so `SetConstraints` also zeroes the
+  masked velocity components; otherwise a "frozen" body still spins.
 
 BulletSharp 0.11.1 is `net40`, so it raises `NU1701` on net8.0. Its `.targets` only
 renames the native library to `libbulletc.dll`, so on Linux the loader never finds
@@ -190,6 +197,24 @@ single `RigidBodyConstructionInfo`, not `(mass, motionState, shape, inertia)`.
 BulletSharp 0.11.1 dates from 2016 and is effectively unmaintained. Its managed API
 differs from current BulletSharp docs, so confirm signatures by reflection before
 writing against it.
+
+## Known C# API gaps
+
+These are declared but not wired, so they silently do nothing. Check them before
+building a feature on top:
+
+- `Input.GetAxisRaw("Mouse ScrollWheel")` always returns 0. The native input state has no
+  scroll field, so the value never reaches the host. `Inputs.json` ships the axis anyway.
+- There is no `Cursor` class, so a script cannot lock or hide the pointer. Play mode does
+  hide the cursor while the right mouse button is held.
+- There is no parent/child API in C#. `parentIndex` exists on the native object and the
+  editor draws the hierarchy, but `Transform.localPosition` is currently the same value as
+  `position` and `lossyScale` returns the local scale, so a child cannot be offset from or
+  follow its parent through scripts.
+- `Time.fixedDeltaTime` is a hard-coded 0.02f; `Rigidbody.drag` and `angularDrag` are plain
+  auto-properties that never reach Bullet.
+- `Input.GetAxis`/`GetAxisRaw` return 0 for any axis that is not in `Config/Inputs.json`,
+  except for the legacy `Horizontal`, `Vertical`, `Mouse X` and `Mouse Y` fallbacks.
 
 ## Working environment notes
 
