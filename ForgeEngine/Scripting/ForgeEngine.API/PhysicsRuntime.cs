@@ -434,12 +434,13 @@ public static class Physics
         SyncBodies();
         PushExternalMoves();
 
-        // Forces must be queued before the step: StepSimulation clears the
+        // Forces and constraints must be applied before the step: StepSimulation clears the
         // accumulated force of every body once it has integrated.
         foreach (var go in Scene.gameObjects)
         {
             if (!go.activeSelf) continue;
             foreach (var force in go.GetComponents<ConstantForce>()) force.Simulate(fixedDeltaTime);
+            foreach (var body in go.GetComponents<Rigidbody>()) body.Simulate(fixedDeltaTime);
         }
 
         _world!.StepSimulation(fixedDeltaTime, 1, fixedDeltaTime);
@@ -516,8 +517,18 @@ public static class Physics
         bool freezeRotX, bool freezeRotY, bool freezeRotZ)
     {
         if (!TryGetBody(id, out var body)) return;
+
+        // The Bullet factors only scale applied force, torque and gravity; a velocity that a
+        // script assigns directly is not masked by them. Unity's freeze does stop that motion,
+        // so mask the velocity components too. This runs every frame before the step, which is
+        // what keeps the axis pinned.
         body.LinearFactor = new BV3(freezeX ? 0f : 1f, freezeY ? 0f : 1f, freezeZ ? 0f : 1f);
         body.AngularFactor = new BV3(freezeRotX ? 0f : 1f, freezeRotY ? 0f : 1f, freezeRotZ ? 0f : 1f);
+
+        var linear = body.LinearVelocity;
+        var angular = body.AngularVelocity;
+        body.LinearVelocity = new BV3(freezeX ? 0f : linear.X, freezeY ? 0f : linear.Y, freezeZ ? 0f : linear.Z);
+        body.AngularVelocity = new BV3(freezeRotX ? 0f : angular.X, freezeRotY ? 0f : angular.Y, freezeRotZ ? 0f : angular.Z);
     }
 
     internal static void Sleep(int id) { if (TryGetBody(id, out var body)) body.ActivationState = ActivationState.IslandSleeping; }
