@@ -30,14 +30,17 @@ struct ForgeScriptObjectState
     float mass = 1.0f;
     bool useGravity = true;
     bool isKinematic = false;
+    int parentId = -1; // stable id of the parent object, -1 = root
+    bool activeSelf = true;
+    float cameraFieldOfView = 60.0f, cameraNearClip = 0.05f, cameraFarClip = 1000.0f;
     std::vector<ForgeScriptAttachment> scripts;
 };
 struct ForgeScriptCommand
 {
     int kind = 0;      // 0 = Instantiate, 1 = Destroy
-    int tempId = -1;   // id the scripts already hold for the new clone
-    int sourceId = -1; // object to clone
-    int targetId = -1; // object to destroy
+    int tempId = -1;   // id the scripts already hold for the new clone (always < -1)
+    int sourceId = -1; // stable id of the object to clone (may be the temp id of a clone made this frame)
+    int targetId = -1; // stable id of the object to destroy (may be a temp id)
     std::string name;
     ForgeScriptVec3 position{}, rotationDegrees{}, scale{1.0f,1.0f,1.0f};
 };
@@ -46,6 +49,8 @@ struct ForgeScriptInputState
     float mouseX = 0.0f, mouseY = 0.0f; // Mouse-axis delta
     float mousePositionX = 0.0f, mousePositionY = 0.0f; // Viewport-local position
     int mouseButtons = 0;
+    float mouseScroll = 0.0f; // wheel notches this frame, positive = away from the user
+    int screenWidth = 0, screenHeight = 0; // game viewport size in pixels
     std::vector<int> keysDown;
 };
 

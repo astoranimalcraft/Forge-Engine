@@ -1376,19 +1376,37 @@ int DX12ForgeEngine::CloneObjectForScript(const GameObject& source, const std::s
     return index;
 }
 
-bool DX12ForgeEngine::DestroyObjectForScript(int id)
+bool DX12ForgeEngine::DestroyObjectForScript(int index)
 {
-    if (id < 0 || id >= static_cast<int>(m_objects.size())) return false;
-    const int oldParent = m_objects[static_cast<size_t>(id)].parentIndex;
-    m_objects.erase(m_objects.begin() + id);
+    if (index < 0 || index >= static_cast<int>(m_objects.size())) return false;
+    // The object's constant buffers may still be referenced by command lists in flight.
+    WaitForGpu();
+    const int oldParent = m_objects[static_cast<size_t>(index)].parentIndex;
+    m_objects.erase(m_objects.begin() + index);
     for (auto& object : m_objects)
     {
-        if (object.parentIndex == id) object.parentIndex = oldParent;
-        else if (object.parentIndex > id) --object.parentIndex;
+        if (object.parentIndex == index) object.parentIndex = oldParent;
+        else if (object.parentIndex > index) --object.parentIndex;
     }
-    if (m_selectedObject == id) m_selectedObject = -1;
-    else if (m_selectedObject > id) --m_selectedObject;
+    if (m_selectedObject == index) m_selectedObject = -1;
+    else if (m_selectedObject > index) --m_selectedObject;
+    if (m_viewportCameraObjectIndex == index) m_viewportCameraObjectIndex = -1;
+    else if (m_viewportCameraObjectIndex > index) --m_viewportCameraObjectIndex;
     for (auto& object : m_objects) RebuildWorldTransform(object);
+    return true;
+}
+
+bool DX12ForgeEngine::IsActiveInHierarchy(const GameObject& object) const
+{
+    if (!object.activeSelf) return false;
+    int parent = object.parentIndex;
+    int guard = static_cast<int>(m_objects.size()) + 1;
+    while (parent >= 0 && parent < static_cast<int>(m_objects.size()) && guard-- > 0)
+    {
+        const GameObject& ancestor = m_objects[static_cast<size_t>(parent)];
+        if (!ancestor.activeSelf) return false;
+        parent = ancestor.parentIndex;
+    }
     return true;
 }
 
@@ -2107,6 +2125,7 @@ void DX12ForgeEngine::PickObject(int mouseX, int mouseY)
     {
         const GameObject& object = m_objects[i];
         if (!object.meshRendererEnabled && !object.isCamera) continue;
+        if (!IsActiveInHierarchy(object)) continue;
         const XMMATRIX inverseWorld = XMMatrixInverse(nullptr, XMLoadFloat4x4(&object.world));
         const XMVECTOR localOriginV = XMVector3TransformCoord(worldOrigin, inverseWorld);
         const XMVECTOR localDirectionV = XMVector3TransformNormal(worldDirection, inverseWorld);
@@ -2445,6 +2464,7 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
     bool hasSpotObjects = false;
     for (GameObject& object : m_objects)
     {
+        if (!IsActiveInHierarchy(object)) continue;
         if (object.lightType == LightType::Directional)
         {
             directionalObject = &object;
@@ -2536,9 +2556,9 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
     int pointCount = 0;
     for (const GameObject& object : m_objects)
     {
-        if (object.lightType != LightType::Point || !object.lightEnabled || pointCount >= 4) continue;
+        if (object.lightType != LightType::Point || !object.lightEnabled || pointCount >= 4 || !IsActiveInHierarchy(object)) continue;
         const size_t index = static_cast<size_t>(pointCount++);
-        frame.pointLightPositionRange[index] = { object.position.x, object.position.y, object.position.z,
+        frame.pointLightPositionRange[index] = { object.world._41, object.world._42, object.world._43,
             std::max(object.lightRange, 0.1f) };
         frame.pointLightColorIntensity[index] = { object.lightColor.x, object.lightColor.y, object.lightColor.z,
             std::max(object.lightIntensity, 0.0f) };
@@ -2555,9 +2575,10 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
     int spotCount = 0;
     for (const GameObject& object : m_objects)
     {
-        if (object.lightType != LightType::Spot || !object.lightEnabled || spotCount >= 4) continue;
+        if (object.lightType != LightType::Spot || !object.lightEnabled || spotCount >= 4 || !IsActiveInHierarchy(object)) continue;
         const size_t index = static_cast<size_t>(spotCount++);
-        const XMMATRIX rotation = XMMatrixRotationRollPitchYaw(object.rotation.x, object.rotation.y, object.rotation.z);
+        // World matrix so spot lights parented to other objects follow their parents.
+        const XMMATRIX rotation = XMLoadFloat4x4(&object.world);
         const XMFLOAT3 localDown{ 0.0f, -1.0f, 0.0f };
         XMFLOAT3 direction{};
         XMStoreFloat3(&direction, XMVector3TransformNormal(XMLoadFloat3(&localDown), rotation));
@@ -2566,7 +2587,7 @@ void DX12ForgeEngine::UpdateConstantBuffers(float totalSeconds)
         const float outerCos = std::cos(outerAngle * Pi / 180.0f);
         const float innerAngle = std::clamp(object.lightInnerAngle, 1.0f, outerAngle - 1.0f);
         const float innerCos = std::cos(innerAngle * Pi / 180.0f);
-        frame.spotLightPositionRange[index] = { object.position.x, object.position.y, object.position.z,
+        frame.spotLightPositionRange[index] = { object.world._41, object.world._42, object.world._43,
             std::max(object.lightRange, 0.1f) };
         frame.spotLightDirectionOuterCos[index] = { direction.x, direction.y, direction.z, outerCos };
         frame.spotLightColorIntensity[index] = { object.lightColor.x, object.lightColor.y, object.lightColor.z,
@@ -2706,7 +2727,7 @@ void DX12ForgeEngine::DrawShadowPass(UINT frameIndex)
     for (const GameObject& object : m_objects)
     {
         if (!object.meshRendererEnabled || !object.castShadows || object.mesh == nullptr ||
-            object.lightType != LightType::None || object.isDragPreview) continue;
+            object.lightType != LightType::None || object.isDragPreview || !IsActiveInHierarchy(object)) continue;
         m_commandList->SetGraphicsRootConstantBufferView(1, object.objectConstants[frameIndex]->GetGPUVirtualAddress());
         DrawMesh(*object.mesh);
     }
@@ -2771,7 +2792,7 @@ void DX12ForgeEngine::DrawObjects(UINT frameIndex)
     for (size_t i = 0; i < m_objects.size(); ++i)
     {
         GameObject& object = m_objects[i];
-        if (!object.meshRendererEnabled || object.mesh == nullptr) continue;
+        if (!object.meshRendererEnabled || object.mesh == nullptr || !IsActiveInHierarchy(object)) continue;
         // Do not draw the active camera's icon at the camera origin into its own view.
         if (object.isCamera && static_cast<int>(i) == m_viewportCameraObjectIndex) continue;
 

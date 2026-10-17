@@ -433,6 +433,8 @@ void DX12ForgeEditorUI::Shutdown()
 void DX12ForgeEditorUI::HandleWin32Message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_DROPFILES) { HandleDroppedFiles(reinterpret_cast<HDROP>(wParam)); return; }
+    if (message == WM_MOUSEWHEEL && m_playPreview)
+        m_pendingMouseWheel += static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) / static_cast<float>(WHEEL_DELTA);
     if (m_win32Initialized)
     {
         (void)ImGui_ImplWin32_WndProcHandler(hwnd, message, wParam, lParam);
@@ -4246,32 +4248,22 @@ void DX12ForgeEditorUI::StartPlayMode(DX12ForgeEngine& engine)
         return;
     }
 
-    m_playTransformSnapshots.clear();
-    m_playTransformSnapshots.reserve(engine.m_objects.size());
-    for (const auto& object : engine.m_objects)
-    {
-        PlayTransformSnapshot snapshot{};
-        snapshot.name = object.name;
-        snapshot.scriptEnabled.reserve(object.scriptComponents.size());
-        for (const auto& script : object.scriptComponents) snapshot.scriptEnabled.push_back(script.enabled);
-        snapshot.position = object.position;
-        snapshot.rotation = object.rotation;
-        snapshot.scale = object.scale;
-        snapshot.lightColor = object.lightColor;
-        snapshot.lightIntensity = object.lightIntensity;
-        snapshot.lightRange = object.lightRange;
-        snapshot.lightInnerAngle = object.lightInnerAngle;
-        snapshot.lightOuterAngle = object.lightOuterAngle;
-        snapshot.meshRendererEnabled = object.meshRendererEnabled;
-        snapshot.lightEnabled = object.lightEnabled;
-        m_playTransformSnapshots.push_back(snapshot);
-    }
+    // Snapshot the whole scene: Instantiate/Destroy change the object list during Play,
+    // so restoring field-by-field per index would drop destroyed objects and keep clones.
+    for (auto& object : engine.m_objects) object.scriptObjectId = -1;
+    m_nextScriptObjectId = 0;
+    m_pendingMouseWheel = 0.0f;
+    engine.m_playSceneSnapshot = engine.m_objects;
+    engine.m_hasPlaySceneSnapshot = true;
+    engine.m_playSelectedObject = engine.m_selectedObject;
+    engine.m_playViewportCameraObjectIndex = engine.m_viewportCameraObjectIndex;
 
     std::vector<std::string> hostLogs;
     if (!m_scriptRuntime->Start(m_sourceRoot, m_projectRoot, hostLogs))
     {
         for (const auto& line : hostLogs) Log(line);
-        m_playTransformSnapshots.clear();
+        engine.m_playSceneSnapshot.clear();
+        engine.m_hasPlaySceneSnapshot = false;
         return;
     }
     for (const auto& line : hostLogs) Log(line);
@@ -4284,29 +4276,24 @@ void DX12ForgeEditorUI::StopPlayMode(DX12ForgeEngine& engine)
 {
     if (m_scriptRuntime) m_scriptRuntime->Stop(&m_logs);
     m_playPreview = false;
-    const size_t restoreCount = (std::min)(engine.m_objects.size(), m_playTransformSnapshots.size());
-    for (size_t i = 0; i < restoreCount; ++i)
+    if (engine.m_hasPlaySceneSnapshot)
     {
-        auto& object = engine.m_objects[i];
-        const auto& snapshot = m_playTransformSnapshots[i];
-        object.name = snapshot.name;
-        for (size_t scriptIndex = 0; scriptIndex < object.scriptComponents.size() && scriptIndex < snapshot.scriptEnabled.size(); ++scriptIndex)
-            object.scriptComponents[scriptIndex].enabled = snapshot.scriptEnabled[scriptIndex];
-        object.position = snapshot.position;
-        object.rotation = snapshot.rotation;
-        object.scale = snapshot.scale;
-        object.lightColor = snapshot.lightColor;
-        object.lightIntensity = snapshot.lightIntensity;
-        object.lightRange = snapshot.lightRange;
-        object.lightInnerAngle = snapshot.lightInnerAngle;
-        object.lightOuterAngle = snapshot.lightOuterAngle;
-        object.meshRendererEnabled = snapshot.meshRendererEnabled;
-        object.lightEnabled = snapshot.lightEnabled;
-        engine.RebuildWorldTransform(object);
+        // Objects created during Play own GPU buffers that may still be in flight.
+        engine.WaitForGpu();
+        engine.m_objects = std::move(engine.m_playSceneSnapshot);
+        engine.m_playSceneSnapshot.clear();
+        engine.m_hasPlaySceneSnapshot = false;
+        const int count = static_cast<int>(engine.m_objects.size());
+        engine.m_selectedObject = engine.m_playSelectedObject < count ? engine.m_playSelectedObject : -1;
+        engine.m_viewportCameraObjectIndex = engine.m_playViewportCameraObjectIndex < count ? engine.m_playViewportCameraObjectIndex : -1;
+        for (auto& object : engine.m_objects)
+        {
+            object.scriptObjectId = -1;
+            engine.RebuildWorldTransform(object);
+        }
     }
-    m_playTransformSnapshots.clear();
     m_statusText = "Stopped";
-    Log("Play mode stopped. Original transforms restored.");
+    Log("Play mode stopped. Scene restored to its state before Play.");
     if (engine.m_standalonePlayer && engine.m_hwnd) PostMessageW(engine.m_hwnd, WM_CLOSE, 0, 0);
 }
 
@@ -4798,33 +4785,6 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         return;
     }
 
-    // Apply Instantiate/Destroy requests the host queued during the previous frame.
-    if (m_scriptRuntime)
-    {
-        constexpr float DegToRadLocal = 0.017453292519943295f;
-        const auto commands = m_scriptRuntime->PendingCommands();
-        for (const auto& command : commands)
-        {
-            if (command.kind == 1)
-            {
-                if (engine.DestroyObjectForScript(command.targetId))
-                    Log("Destroy removed object ID " + std::to_string(command.targetId) + " at end of frame.");
-                continue;
-            }
-            if (command.sourceId < 0 || command.sourceId >= static_cast<int>(engine.m_objects.size())) continue;
-            const auto& source = engine.m_objects[static_cast<size_t>(command.sourceId)];
-            const std::string cloneName = command.name.empty() ? source.name + " (Clone)" : command.name;
-            const int cloneIndex = engine.CloneObjectForScript(source, cloneName);
-            auto& clone = engine.m_objects[static_cast<size_t>(cloneIndex)];
-            clone.position = { command.position.x, command.position.y, command.position.z };
-            clone.rotation = { command.rotationDegrees.x * DegToRadLocal, command.rotationDegrees.y * DegToRadLocal, command.rotationDegrees.z * DegToRadLocal };
-            clone.scale = { std::max(0.001f, command.scale.x), std::max(0.001f, command.scale.y), std::max(0.001f, command.scale.z) };
-            engine.RebuildWorldTransform(clone);
-            m_scriptRuntime->AddIdMapping(command.tempId, cloneIndex);
-            Log("Instantiate created '" + clone.name + "' (ID " + std::to_string(cloneIndex) + ").");
-        }
-    }
-
     ForgeScriptInputState input{};
     const bool appFocused = GetForegroundWindow() == engine.m_hwnd;
     ImGuiIO& io = ImGui::GetIO();
@@ -4847,6 +4807,7 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
             if (GetAsyncKeyState(VK_LBUTTON) < 0) input.mouseButtons |= 1;
             if (GetAsyncKeyState(VK_RBUTTON) < 0) input.mouseButtons |= 2;
             if (GetAsyncKeyState(VK_MBUTTON) < 0) input.mouseButtons |= 4;
+            input.mouseScroll = m_pendingMouseWheel;
         }
         previousCursor = cursor;
     }
@@ -4870,6 +4831,7 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
             if (io.MouseDown[0]) input.mouseButtons |= 1;
             if (io.MouseDown[1]) input.mouseButtons |= 2;
             if (io.MouseDown[2]) input.mouseButtons |= 4;
+            input.mouseScroll = m_pendingMouseWheel;
         }
     }
     if (appFocused)
@@ -4883,16 +4845,32 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         };
         for (int key : keys) if ((GetAsyncKeyState(key) & 0x8000) != 0) input.keysDown.push_back(key);
     }
+    m_pendingMouseWheel = 0.0f;
+    input.screenWidth = static_cast<int>(engine.m_sceneViewportWidth);
+    input.screenHeight = static_cast<int>(engine.m_sceneViewportHeight);
 
     constexpr float RadToDeg = 57.29577951308232f;
     constexpr float DegToRad = 0.017453292519943295f;
+
+    // Scripts address objects by a stable id: vector indices shift whenever an object is destroyed.
+    for (auto& object : engine.m_objects)
+        if (object.scriptObjectId < 0) object.scriptObjectId = m_nextScriptObjectId++;
+    std::unordered_map<int, int> indexOfId;
+    auto rebuildIdIndex = [&]()
+    {
+        indexOfId.clear();
+        for (size_t i = 0; i < engine.m_objects.size(); ++i)
+            indexOfId[engine.m_objects[i].scriptObjectId] = static_cast<int>(i);
+    };
+    rebuildIdIndex();
+
     std::vector<ForgeScriptObjectState> states;
     states.reserve(engine.m_objects.size());
     for (size_t i = 0; i < engine.m_objects.size(); ++i)
     {
         const auto& object = engine.m_objects[i];
         ForgeScriptObjectState state{};
-        state.id = static_cast<int>(i);
+        state.id = object.scriptObjectId;
         state.name = object.name;
         state.position = { object.position.x, object.position.y, object.position.z };
         state.rotationDegrees = { object.rotation.x * RadToDeg, object.rotation.y * RadToDeg, object.rotation.z * RadToDeg };
@@ -4918,6 +4896,12 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         state.mass = object.rigidbodyMass;
         state.useGravity = object.rigidbodyUseGravity;
         state.isKinematic = object.rigidbodyIsKinematic;
+        state.parentId = object.parentIndex >= 0 && object.parentIndex < static_cast<int>(engine.m_objects.size())
+            ? engine.m_objects[static_cast<size_t>(object.parentIndex)].scriptObjectId : -1;
+        state.activeSelf = object.activeSelf;
+        state.cameraFieldOfView = object.cameraFieldOfView;
+        state.cameraNearClip = object.cameraNearClip;
+        state.cameraFarClip = object.cameraFarClip;
         for (const auto& script : object.scriptComponents)
             state.scripts.push_back({ script.className, script.enabled });
         states.push_back(std::move(state));
@@ -4931,10 +4915,43 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         return;
     }
     for (const auto& line : runtimeLogs) Log(line);
-    for (const auto& state : states)
+
+    // Temporary ids scripts hold for clones created this frame -> stable ids assigned below.
+    std::unordered_map<int, int> idOfTemp;
+    auto resolveIndex = [&](int id) -> int
     {
-        if (state.id < 0 || state.id >= static_cast<int>(engine.m_objects.size())) continue;
-        auto& object = engine.m_objects[static_cast<size_t>(state.id)];
+        if (const auto temp = idOfTemp.find(id); temp != idOfTemp.end()) id = temp->second;
+        const auto found = indexOfId.find(id);
+        return found != indexOfId.end() ? found->second : -1;
+    };
+
+    // 1) Instantiate first: clones are appended, so states[i] still matches m_objects[i].
+    const auto commands = m_scriptRuntime->PendingCommands();
+    for (const auto& command : commands)
+    {
+        if (command.kind != 0) continue;
+        const int sourceIndex = resolveIndex(command.sourceId);
+        if (sourceIndex < 0) continue;
+        const std::string cloneName = command.name.empty()
+            ? engine.m_objects[static_cast<size_t>(sourceIndex)].name + " (Clone)" : command.name;
+        const int cloneIndex = engine.CloneObjectForScript(engine.m_objects[static_cast<size_t>(sourceIndex)], cloneName);
+        auto& clone = engine.m_objects[static_cast<size_t>(cloneIndex)];
+        clone.position = { command.position.x, command.position.y, command.position.z };
+        clone.rotation = { command.rotationDegrees.x * DegToRad, command.rotationDegrees.y * DegToRad, command.rotationDegrees.z * DegToRad };
+        clone.scale = { std::max(0.001f, command.scale.x), std::max(0.001f, command.scale.y), std::max(0.001f, command.scale.z) };
+        clone.scriptObjectId = m_nextScriptObjectId++;
+        indexOfId[clone.scriptObjectId] = cloneIndex;
+        idOfTemp[command.tempId] = clone.scriptObjectId;
+        m_scriptRuntime->AddIdMapping(command.tempId, clone.scriptObjectId);
+        engine.RebuildWorldTransform(clone);
+        Log("Instantiate created '" + clone.name + "' (ID " + std::to_string(clone.scriptObjectId) + ").");
+    }
+
+    // 2) Apply script-side state to the objects that existed when the frame was sent.
+    for (size_t i = 0; i < states.size() && i < engine.m_objects.size(); ++i)
+    {
+        const auto& state = states[i];
+        auto& object = engine.m_objects[i];
         object.name = state.name;
         object.position = { state.position.x, state.position.y, state.position.z };
         object.rotation = { state.rotationDegrees.x * DegToRad, state.rotationDegrees.y * DegToRad, state.rotationDegrees.z * DegToRad };
@@ -4956,6 +4973,22 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         object.rigidbodyMass = std::max(0.01f, state.mass);
         object.rigidbodyUseGravity = state.useGravity;
         object.rigidbodyIsKinematic = state.isKinematic;
+        object.activeSelf = state.activeSelf;
+        if (object.isCamera)
+        {
+            object.cameraFieldOfView = std::clamp(state.cameraFieldOfView, 20.0f, 110.0f);
+            object.cameraNearClip = std::clamp(state.cameraNearClip, 0.01f, 100.0f);
+            object.cameraFarClip = std::max(object.cameraNearClip + 0.1f, std::min(state.cameraFarClip, 100000.0f));
+        }
+        const int parentIndex = state.parentId == -1 ? -1 : resolveIndex(state.parentId);
+        if ((state.parentId == -1 || parentIndex >= 0) && parentIndex != object.parentIndex)
+        {
+            bool createsCycle = false;
+            for (int ancestor = parentIndex, guard = static_cast<int>(engine.m_objects.size()); ancestor >= 0 && guard-- > 0;
+                ancestor = engine.m_objects[static_cast<size_t>(ancestor)].parentIndex)
+                if (ancestor == static_cast<int>(i)) { createsCycle = true; break; }
+            if (!createsCycle) object.parentIndex = parentIndex;
+        }
         for (const auto& scriptState : state.scripts)
         {
             for (auto& scriptComponent : object.scriptComponents)
@@ -4967,6 +5000,21 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
                 }
             }
         }
-        engine.RebuildWorldTransform(object);
     }
+
+    // 3) Destroy last; it shifts vector indices, so ids are resolved again after each removal.
+    for (const auto& command : commands)
+    {
+        if (command.kind != 1) continue;
+        const int index = resolveIndex(command.targetId);
+        if (index < 0) continue;
+        const int stableId = engine.m_objects[static_cast<size_t>(index)].scriptObjectId;
+        if (engine.DestroyObjectForScript(index))
+        {
+            Log("Destroy removed object ID " + std::to_string(stableId) + " at end of frame.");
+            rebuildIdIndex();
+        }
+    }
+
+    for (auto& object : engine.m_objects) engine.RebuildWorldTransform(object);
 }

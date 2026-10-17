@@ -249,7 +249,8 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
     if(!IsRunning())return false;std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(9);
     out<<"FRAME|"<<(std::isfinite(deltaSeconds)?std::max(0.0f,deltaSeconds):0.0f)<<'|'<<input.mouseX<<'|'<<input.mouseY
        <<'|'<<input.mousePositionX<<'|'<<input.mousePositionY<<'|'<<input.mouseButtons<<'|';
-    for(size_t i=0;i<input.keysDown.size();++i){if(i)out<<',';out<<input.keysDown[i];}out<<'\n';
+    for(size_t i=0;i<input.keysDown.size();++i){if(i)out<<',';out<<input.keysDown[i];}
+    out<<'|'<<input.mouseScroll<<'|'<<input.screenWidth<<'|'<<input.screenHeight<<'\n';
     for(const auto& mapping:m_idMappings)out<<"NEWID|"<<mapping.first<<'|'<<mapping.second<<'\n';
     m_idMappings.clear();
     m_pendingCommands.clear();
@@ -259,7 +260,8 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
         <<o.lightColor.z<<'|'<<o.lightIntensity<<'|'<<o.lightRange<<'|'<<o.lightInnerAngle<<'|'<<o.lightOuterAngle<<'|'
         <<(o.hasCollider?1:0)<<'|'<<(o.hasAudioSource?1:0)<<'|'<<(o.hasCamera?1:0)<<'|'
         <<Base64Encode(o.tag)<<'|'<<o.layer<<'|'<<o.colliderType<<'|'<<o.colliderSize.x<<'|'<<o.colliderSize.y<<'|'<<o.colliderSize.z<<'|'
-        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'\n';
+        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'|'
+        <<o.parentId<<'|'<<(o.activeSelf?1:0)<<'|'<<o.cameraFieldOfView<<'|'<<o.cameraNearClip<<'|'<<o.cameraFarClip<<'\n';
         for(const auto& s:o.scripts)out<<"SCRIPT|"<<o.id<<'|'<<s.className<<'|'<<(s.enabled?1:0)<<'\n';}
     out<<"END\n";if(!SendText(out.str())){logs.push_back("ERROR: Lost connection to the C# script host.");Stop();return false;}
     bool gotEnd=false;const ULONGLONG deadline=GetTickCount64()+3000;std::map<int,ForgeScriptObjectState*> byId;for(auto& o:objects)byId[o.id]=&o;
@@ -277,7 +279,7 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
         else if(p.size()>=3&&p[0]=="CMD"&&p[1]=="DEST")
         {
             ForgeScriptCommand command;command.kind=1;command.targetId=ToInt(p[2],-1);
-            if(command.targetId>=0)m_pendingCommands.push_back(command);
+            if(command.targetId!=-1)m_pendingCommands.push_back(command);
         }
         else if(p.size()>=14&&p[0]=="CMD"&&p[1]=="INST")
         {
@@ -286,7 +288,7 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
             command.position={ToFloat(p[5],0),ToFloat(p[6],0),ToFloat(p[7],0)};
             command.rotationDegrees={ToFloat(p[8],0),ToFloat(p[9],0),ToFloat(p[10],0)};
             command.scale={ToFloat(p[11],1),ToFloat(p[12],1),ToFloat(p[13],1)};
-            if(command.sourceId>=0&&command.tempId<0)m_pendingCommands.push_back(command);
+            if(command.sourceId!=-1&&command.tempId<-1)m_pendingCommands.push_back(command);
         }
         else if(p.size()>=20&&p[0]=="SET"){int id=ToInt(p[1],-1);auto it=byId.find(id);if(it==byId.end())continue;auto& o=*it->second;
             o.position={ToFloat(p[2],o.position.x),ToFloat(p[3],o.position.y),ToFloat(p[4],o.position.z)};
@@ -299,6 +301,8 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
             if(p.size()>=31){o.colliderType=ToInt(p[22],o.colliderType);o.colliderSize={ToFloat(p[23],o.colliderSize.x),ToFloat(p[24],o.colliderSize.y),ToFloat(p[25],o.colliderSize.z)};
                 o.isTrigger=ToInt(p[26],o.isTrigger?1:0)!=0;o.hasRigidbody=ToInt(p[27],o.hasRigidbody?1:0)!=0;o.mass=ToFloat(p[28],o.mass);
                 o.useGravity=ToInt(p[29],o.useGravity?1:0)!=0;o.isKinematic=ToInt(p[30],o.isKinematic?1:0)!=0;}
+            if(p.size()>=36){o.parentId=ToInt(p[31],o.parentId);o.activeSelf=ToInt(p[32],o.activeSelf?1:0)!=0;
+                o.cameraFieldOfView=ToFloat(p[33],o.cameraFieldOfView);o.cameraNearClip=ToFloat(p[34],o.cameraNearClip);o.cameraFarClip=ToFloat(p[35],o.cameraFarClip);}
         }else AppendHostLog(line,logs);
     }
     if(!gotEnd){logs.push_back("ERROR: C# host did not answer in 3 seconds. A script may be stuck in an infinite loop; the isolated host is stopping.");Stop();return false;}return true;
