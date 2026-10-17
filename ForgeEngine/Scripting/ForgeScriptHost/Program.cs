@@ -38,6 +38,8 @@ internal static class Program
     private static readonly Dictionary<string, Type> ScriptTypes = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, ScriptInstance> Instances = new(StringComparer.Ordinal);
     private static readonly HashSet<string> MissingClassesReported = new(StringComparer.Ordinal);
+    // Scripts removed with Destroy(component); the native scene still lists them, so they must not be re-created.
+    private static readonly Dictionary<string, (int ObjectId, string ClassName)> RemovedScripts = new(StringComparer.Ordinal);
     private static readonly object OutputLock = new();
     private static float FixedAccumulator;
 
@@ -102,6 +104,9 @@ internal static class Program
         if (frame.Length > 7 && !string.IsNullOrWhiteSpace(frame[7]))
             foreach (string key in frame[7].Split(',', StringSplitOptions.RemoveEmptyEntries))
                 if (int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)) keys.Add(value);
+        float mouseScroll = ParseFloat(frame, 8, 0);
+        int screenWidth = ParseInt(frame, 9, 0);
+        int screenHeight = ParseInt(frame, 10, 0);
 
         var incomingObjects = new List<RuntimeObjectData>();
         var attachments = new List<AttachedScript>();
@@ -145,6 +150,14 @@ internal static class Program
                     data.UseGravity = ParseInt(p,35,1) != 0;
                     data.IsKinematic = ParseInt(p,36,0) != 0;
                 }
+                if (p.Length >= 42)
+                {
+                    data.ParentId = ParseInt(p, 37, -1);
+                    data.ActiveSelf = ParseInt(p, 38, 1) != 0;
+                    data.CameraFieldOfView = ParseFloat(p, 39, 60);
+                    data.CameraNearClip = ParseFloat(p, 40, 0.05f);
+                    data.CameraFarClip = ParseFloat(p, 41, 1000);
+                }
                 incomingObjects.Add(data);
             }
             else if (p[0] == "SCRIPT" && p.Length >= 4)
@@ -154,13 +167,15 @@ internal static class Program
         Scene.SyncObjects(incomingObjects);
         Application.isPlaying = true;
         Time.BeginFrame(delta);
-        Input.BeginFrame(keys, mouseButtons, mouseX, mouseY, mousePositionX, mousePositionY);
+        Screen.SetSize(screenWidth, screenHeight);
+        Input.BeginFrame(keys, mouseButtons, mouseX, mouseY, mousePositionX, mousePositionY, mouseScroll);
         SynchronizeScripts(attachments);
 
         foreach (var instance in Instances.Values.ToArray())
         {
             if (Scene.FindById(instance.ObjectId) is null) { Destroy(instance); continue; }
-            bool shouldRun = instance.Behaviour.enabled && instance.Behaviour.gameObject.activeSelf;
+            bool objectActive = instance.Behaviour.gameObject.activeInHierarchy;
+            bool shouldRun = instance.Behaviour.enabled && objectActive;
             if (shouldRun && !instance.LastEnabled)
             {
                 if (!instance.Awoken)
@@ -171,29 +186,57 @@ internal static class Program
                 SafeCall(instance, "OnEnable", instance.Behaviour.OnEnable);
                 if (!instance.Started) { SafeCall(instance, "Start", instance.Behaviour.Start); instance.Started = true; }
             }
-            else if (!shouldRun && instance.LastEnabled) SafeCall(instance, "OnDisable", instance.Behaviour.OnDisable);
+            else if (!shouldRun && instance.LastEnabled)
+            {
+                SafeCall(instance, "OnDisable", instance.Behaviour.OnDisable);
+                // Like Unity, deactivating the GameObject (not just the script) stops its coroutines.
+                if (!objectActive) instance.Behaviour.StopAllCoroutines();
+            }
             instance.LastEnabled = shouldRun;
         }
 
-        const float fixedStep = 0.02f;
-        FixedAccumulator = MathF.Min(FixedAccumulator + delta, fixedStep * 5.0f);
+        // Fixed steps advance with scaled time, so Time.timeScale = 0 pauses physics and FixedUpdate.
+        float fixedStep = Time.fixedDeltaTime;
+        FixedAccumulator = MathF.Min(FixedAccumulator + Time.deltaTime, fixedStep * 5.0f);
         int fixedSteps = 0;
         while (FixedAccumulator >= fixedStep && fixedSteps < 5)
         {
-            Time.SetDeltaTimeFromHost(fixedStep);
+            Time.BeginFixedStep();
             foreach (var instance in Instances.Values.ToArray())
-                if (instance.LastEnabled && instance.Behaviour.enabled)
+                if (IsRunnable(instance))
                     SafeCall(instance, "FixedUpdate", instance.Behaviour.FixedUpdate);
             Physics.SimulateRuntimeStep(fixedStep);
+            Time.EndFixedStep();
             FixedAccumulator -= fixedStep;
             fixedSteps++;
         }
-        Time.SetDeltaTimeFromHost(delta);
+
+        foreach (var instance in Instances.Values.ToArray())
+            if (IsRunnable(instance)) SafeCall(instance, "Update", instance.Behaviour.Update);
+
+        // Invoke callbacks and coroutines resume after every Update and before LateUpdate (Unity order).
         foreach (var instance in Instances.Values.ToArray())
         {
-            if (!instance.LastEnabled || !instance.Behaviour.enabled) continue;
-            SafeCall(instance, "Update", instance.Behaviour.Update);
-            SafeCall(instance, "LateUpdate", instance.Behaviour.LateUpdate);
+            var behaviour = instance.Behaviour;
+            if (behaviour.DestroyRequested || behaviour.gameObject.isDestroyed || !behaviour.gameObject.activeInHierarchy) continue;
+            behaviour.TickInvokes(Time.deltaTime);
+            behaviour.TickCoroutines(Time.deltaTime, Time.unscaledDeltaTime);
+        }
+
+        foreach (var instance in Instances.Values.ToArray())
+            if (IsRunnable(instance)) SafeCall(instance, "LateUpdate", instance.Behaviour.LateUpdate);
+
+        Scene.TickDelayedDestroys(Time.deltaTime);
+        foreach (var instance in Instances.Values.Where(i => i.Behaviour.DestroyRequested).ToArray())
+        {
+            string key = Key(instance.ObjectId, instance.ClassName);
+            Destroy(instance);
+            RemovedScripts[key] = (instance.ObjectId, instance.ClassName);
+        }
+        foreach (var (key, removed) in RemovedScripts.ToArray())
+        {
+            if (Scene.FindById(removed.ObjectId) is null) { RemovedScripts.Remove(key); continue; }
+            Emit("SCRIPTSET", removed.ObjectId.ToString(CultureInfo.InvariantCulture), removed.ClassName, "0");
         }
 
         foreach (var instance in Instances.Values)
@@ -217,7 +260,9 @@ internal static class Program
                 s.ColliderType.ToString(CultureInfo.InvariantCulture),
                 F(s.ColliderSize.x), F(s.ColliderSize.y), F(s.ColliderSize.z),
                 s.IsTrigger ? "1" : "0", s.HasRigidbody ? "1" : "0", F(s.Mass),
-                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0");
+                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0",
+                s.ParentId.ToString(CultureInfo.InvariantCulture), s.ActiveSelf ? "1" : "0",
+                F(s.CameraFieldOfView), F(s.CameraNearClip), F(s.CameraFarClip));
         }
 
         foreach (var command in ForgeRuntimeCommands.Drain())
@@ -229,7 +274,7 @@ internal static class Program
                     F(command.position.x), F(command.position.y), F(command.position.z),
                     F(command.rotationDegrees.x), F(command.rotationDegrees.y), F(command.rotationDegrees.z),
                     F(command.scale.x), F(command.scale.y), F(command.scale.z));
-            else if (command.targetId >= 0)
+            else if (command.targetId != -1)
                 Emit("CMD", "DEST", command.targetId.ToString(CultureInfo.InvariantCulture));
         }
         Emit("END");
@@ -244,6 +289,7 @@ internal static class Program
         foreach (var attach in desired.Values)
         {
             string key = Key(attach.ObjectId, attach.ClassName);
+            if (RemovedScripts.ContainsKey(key)) continue;
             if (!Instances.TryGetValue(key, out var instance))
             {
                 Type? type = ResolveScriptType(attach.ClassName);
@@ -268,6 +314,8 @@ internal static class Program
         }
     }
 
+    private static bool IsRunnable(ScriptInstance instance)
+        => instance.LastEnabled && instance.Behaviour.enabled && !instance.Behaviour.DestroyRequested && !instance.Behaviour.gameObject.isDestroyed;
     private static Type? ResolveScriptType(string name)
     {
         if (ScriptTypes.TryGetValue(name, out var type)) return type;

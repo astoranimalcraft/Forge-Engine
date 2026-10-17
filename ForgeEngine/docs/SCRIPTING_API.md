@@ -64,9 +64,9 @@ public sealed class PlayerMovement : MonoBehaviour
 | `Awake()` | Na primeira ativação da instância. |
 | `OnEnable()` | Quando o componente fica ativo. |
 | `Start()` | Uma vez antes da primeira atualização ativa. |
-| `FixedUpdate()` | Em passos fixos de 0,02 s, com limite de até cinco passos por frame. |
+| `FixedUpdate()` | Em passos fixos de `Time.fixedDeltaTime` (0,02 s por padrão) em tempo escalado, com limite de até cinco passos por frame. |
 | `Update()` | Uma vez por frame enquanto o componente estiver ativo. |
-| `LateUpdate()` | Depois de `Update()` no frame. |
+| `LateUpdate()` | Depois do `Update()` de todos os scripts e das corrotinas do frame. |
 | `OnDisable()` | Quando o componente passa de ativo para desativado. |
 | `OnDestroy()` | Quando a instância é removida/encerrada. |
 
@@ -96,16 +96,17 @@ IDs são internos à cena em execução; não os persista como identificadores e
 
 ### `Transform`
 
-- `position`: posição no mundo.
-- `localPosition`: alias de `position` nesta versão; hierarquia de pais não é implementada.
-- `rotation` / `eulerAngles` / `localEulerAngles`: rotação Euler em graus.
-- `localScale` / `lossyScale`: escala; `lossyScale` devolve o mesmo valor que `localScale`.
+- `position`: posição no mundo; `localPosition`: posição relativa ao pai (valor salvo na cena).
+- `rotation` / `eulerAngles`: rotação Euler do mundo em graus; `localEulerAngles` / `localRotation`: relativas ao pai; `quaternion`: rotação do mundo como `Quaternion`.
+- Ordem Euler: Z, depois X, depois Y (igual à Unity e ao renderer DX12).
+- `localScale`; `lossyScale` = produto das escalas da cadeia de pais.
+- Hierarquia (v0.6.0): `parent`, `SetParent(parent, worldPositionStays = true)`, `childCount`, `GetChild(i)`, `Find("Filho/Neto")`, `root`, `IsChildOf`, `DetachChildren`.
 - `forward`, `right`, `up`: direções calculadas a partir da rotação.
 - `Translate(Vector3 value, Space relativeTo = Space.Self)`.
 - `Rotate(Vector3 eulerDegrees, Space relativeTo = Space.Self)` e overload com três floats.
 - `LookAt(Vector3 target)`.
 
-Nota: o argumento `relativeTo` de `Rotate` é aceito por compatibilidade, mas a implementação atual soma os ângulos Euler; não oferece todas as semânticas de quaternion/space da Unity.
+`Rotate` respeita `Space.Self` (eixos locais) e `Space.World` (eixos do mundo). Também existem `Rotate(axis, angle)`, `RotateAround(point, axis, angle)` e `SetPositionAndRotation`.
 
 ### `Vector2`
 
@@ -139,15 +140,16 @@ Campos `x`, `y`, `z`; `magnitude`, `sqrMagnitude`, `normalized`; constantes `zer
 - `mouseDelta`: deslocamento do mouse em pixels no frame.
 - `GetAxis` / `GetAxisRaw` aceitam `Horizontal`, `Vertical`, `Mouse X`, `Mouse Y` e `Mouse ScrollWheel`.
 
-Mapeamento de eixos: `Horizontal = D - A`, `Vertical = W - S`; Mouse X/Y usam o delta do mouse. `Mouse ScrollWheel` devolve `0` nesta versão. Input do mouse é preenchido quando o cursor está dentro do viewport e a janela está em foco.
+Mapeamento de eixos: `Horizontal = D - A`, `Vertical = W - S`; Mouse X/Y usam o delta do mouse. `Mouse ScrollWheel` e `Input.mouseScrollDelta.y` devolvem os "cliques" da roda do mouse no frame (positivo = para frente). Input do mouse é preenchido quando o cursor está dentro do viewport e a janela está em foco.
 
-`KeyCode` inclui letras A–Z, setas, espaço, Return, Escape, Backspace, Tab, Shift, Control, Alt e F1–F12. Nem todos os estados de tecla distinguem modificadores da mesma forma que um sistema de input completo.
+`KeyCode` inclui letras A–Z, números `Alpha0`–`Alpha9`, `Delete`, setas, espaço, Return, Escape, Backspace, Tab, Shift, Control, Alt e F1–F12. Nem todos os estados de tecla distinguem modificadores da mesma forma que um sistema de input completo.
 
 ### `Time`
 
 - `deltaTime`: tempo do frame atual em segundos.
-- `unscaledDeltaTime`: alias de `deltaTime`.
-- `fixedDeltaTime`: 0,02 s.
+- `unscaledDeltaTime`: tempo do frame sem `Time.timeScale`.
+- `fixedDeltaTime`: intervalo do `FixedUpdate` (0,02 s por padrão, configurável); dentro de `FixedUpdate`, `deltaTime` vale `fixedDeltaTime`.
+- `timeScale`: escala de tempo; `0` pausa `FixedUpdate`, física e `WaitForSeconds`.
 - `time`: tempo acumulado no processo host.
 - `frameCount`: número de frames processados.
 
@@ -199,7 +201,7 @@ Saídas padrão:
 - `TransformPoint(point)` transforma um ponto local incluindo escala e posição.
 - `InverseTransformPoint(point)` converte um ponto do mundo para o espaço local.
 
-Esta versão não implementa hierarquia pai/filho: `localPosition` continua sendo um alias de `position`.
+Desde a v0.6.0 essas conversões seguem a cadeia de pais com a mesma composição do renderer (escala, rotação, translação e depois o pai).
 
 ### Matemática e aleatoriedade
 
@@ -236,7 +238,7 @@ public sealed class Patrol : MonoBehaviour
 
 ### Limites importantes
 
-A API pode alterar as propriedades que o protocolo sincroniza com o renderer nativo. A física é básica e não substitui um solver completo; áudio aceita WAV via WinMM; ainda não há coroutines, criação/remoção de GameObjects nativos em runtime, nem reprodução de vídeo. Não confunda essas APIs iniciais com sistemas completos de produção.
+A API pode alterar as propriedades que o protocolo sincroniza com o renderer nativo. A física é básica e não substitui um solver completo; áudio aceita WAV via WinMM; não há reprodução de vídeo. Corrotinas, `Invoke` e `Instantiate`/`Destroy` estão disponíveis (veja PATCH_NOTES_v060.md). Não confunda essas APIs iniciais com sistemas completos de produção.
 
 
 ## 7. Componentes adicionais na v0.4.9
@@ -262,7 +264,7 @@ A física atual é deliberadamente simples: integração em passo fixo, colisão
 
 ### Câmera
 
-`Camera.main`, `fieldOfView`, `nearClipPlane` e `farClipPlane` estão disponíveis para scripts. Esses valores gerenciados ainda não são conectados ao render pass de uma câmera secundária.
+`Camera.main`, `fieldOfView`, `nearClipPlane` e `farClipPlane` estão disponíveis para scripts e são sincronizados com o objeto Camera nativo (v0.6.0). `ScreenPointToRay(Input.mousePosition)` e `WorldToScreenPoint` usam o tamanho do viewport (`Screen.width`/`height`).
 
 ### Áudio WAV
 
@@ -274,3 +276,46 @@ audio.Play();
 ```
 
 O backend atual usa `winmm.PlaySound`, aceita WAV e suporta apenas um stream ativo no processo. `Pause()` interrompe o stream; reprodução espacial 3D, mixer, pitch-shifting e múltiplos canais ainda não estão implementados.
+
+
+## 8. Novidades da v0.6.0
+
+### Corrotinas e Invoke
+
+```csharp
+public sealed class Blink : MonoBehaviour
+{
+    public override void Start()
+    {
+        StartCoroutine(BlinkRoutine());
+        InvokeRepeating(nameof(Tick), 1f, 1f);
+    }
+
+    private System.Collections.IEnumerator BlinkRoutine()
+    {
+        var renderer = GetComponent<MeshRenderer>();
+        while (true)
+        {
+            renderer!.enabled = !renderer.enabled;
+            yield return new WaitForSeconds(0.5f);
+            yield return new WaitUntil(() => !Input.GetKey(KeyCode.Space));
+        }
+    }
+
+    private void Tick() => Debug.Log($"t = {Time.time:0.0}");
+}
+```
+
+- Yield suportados: `null`, `WaitForSeconds`, `WaitForSecondsRealtime`, `WaitForEndOfFrame`, `WaitForFixedUpdate`, `WaitUntil`, `WaitWhile`, `CustomYieldInstruction`, outra `Coroutine` ou `IEnumerator`.
+- As corrotinas retomam depois de todos os `Update` e antes dos `LateUpdate`. Desativar o GameObject para as corrotinas dele.
+
+### Ativação, hierarquia e destruição
+
+- `gameObject.SetActive(bool)` é sincronizado com o renderer; `activeInHierarchy` considera os pais.
+- `Destroy(gameObject)` destrói também os filhos; `Destroy(gameObject, 2f)` agenda a destruição; `Destroy(this)` remove só o script.
+- `Instantiate(prefab, parent)` / `Instantiate(prefab, position, rotation, parent)`.
+- `GetComponentInChildren<T>()`, `GetComponentsInChildren<T>()`, `GetComponentInParent<T>()`.
+
+### Testes automatizados
+
+`dotnet test Scripting/ForgeEngine.Tests` executa testes da API e do host real (`ForgeScriptHost`) pelo protocolo de linhas.

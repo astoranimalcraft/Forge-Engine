@@ -151,22 +151,8 @@ private:
     bool m_openCreateScriptModal = false;
     int m_scriptCreateTargetIndex = -1;
     char m_newScriptClassName[128] = "NewBehaviourScript";
-    struct PlayTransformSnapshot
-    {
-        std::string name;
-        std::vector<bool> scriptEnabled;
-        DirectX::XMFLOAT3 position{};
-        DirectX::XMFLOAT3 rotation{};
-        DirectX::XMFLOAT3 scale{1.0f,1.0f,1.0f};
-        DirectX::XMFLOAT3 lightColor{1.0f,1.0f,1.0f};
-        float lightIntensity = 1.0f;
-        float lightRange = 10.0f;
-        float lightInnerAngle = 18.0f;
-        float lightOuterAngle = 30.0f;
-        bool meshRendererEnabled = true;
-        bool lightEnabled = true;
-    };
-    std::vector<PlayTransformSnapshot> m_playTransformSnapshots;
+    int m_nextScriptObjectId = 0;
+    float m_pendingMouseWheel = 0.0f;
     std::filesystem::path m_activeAssetFolder;
     std::filesystem::path m_selectedAssetPath;
     // Project browser listings are cached and rescanned at most twice per second.

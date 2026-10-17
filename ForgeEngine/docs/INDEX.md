@@ -37,6 +37,8 @@ Projeto Hub com fluxo de carregamento, caption da janela personalizada, organiza
 
 - [Patch notes v0.5.6 — compilação C#, painel Project Files, céu azul procedural, câmera na viewport, screenshot/stats/busca](PATCH_NOTES_v056.md)
 
+- [Patch notes v0.6.0 — IDs estáveis, Play/Stop seguro, hierarquia/SetActive/corrotinas/Invoke na API C# e testes automatizados](PATCH_NOTES_v060.md)
+
 - [Patch notes v0.5.7 — Export Game standalone, API C# Unity-like (Quaternion, tag/layer, Instantiate/Destroy, PlayerPrefs), céu azul UE5, hierarquia pai/filho, snapping do gizmo e fim do flicker do Project Explorer](PATCH_NOTES_v057.md)
 
 - [Patch notes v0.5.8 — Config/Inputs.json (teclas/eixos/comandos), scaffold de projeto com README e exemplos, eventos OnCollision/OnTrigger, colider escala+junto do gizmo, wireframe de colisão no viewport, ConstantForce/AutoDestroy/LookAtTarget, céu azul definitivo, fim do flicker da barra Assets, texturas/normal map de modelos](PATCH_NOTES_v058.md)

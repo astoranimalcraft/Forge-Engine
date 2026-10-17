@@ -1,6 +1,10 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("ForgeScriptHost")]
+[assembly: InternalsVisibleTo("ForgeEngine.Tests")]
 
 namespace ForgeEngine;
 
@@ -141,7 +145,8 @@ public struct Color
 public enum Space { World, Self }
 public enum LightType { None = 0, Directional = 1, Point = 2, Spot = 3 }
 
-/// <summary>Rotation quaternion. Euler angles use the same X-then-Y-then-Z order as Transform.rotation.</summary>
+/// <summary>Rotation quaternion. Euler angles are applied Z, then X, then Y (Unity convention), which is the
+/// same order the DirectX 12 renderer uses (XMMatrixRotationRollPitchYaw).</summary>
 public struct Quaternion
 {
     public float x, y, z, w;
@@ -167,15 +172,64 @@ public struct Quaternion
         a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z);
 
     public static Quaternion Euler(float xDegrees, float yDegrees, float zDegrees)
-        => mul(AngleAxis(zDegrees, Vector3.forward), mul(AngleAxis(yDegrees, Vector3.up), AngleAxis(xDegrees, Vector3.right)));
+        => AngleAxis(yDegrees, Vector3.up) * AngleAxis(xDegrees, Vector3.right) * AngleAxis(zDegrees, Vector3.forward);
     public static Quaternion Euler(Vector3 eulerDegrees) => Euler(eulerDegrees.x, eulerDegrees.y, eulerDegrees.z);
-    public static Quaternion LookRotation(Vector3 forward)
+    public static Quaternion LookRotation(Vector3 forward) => LookRotation(forward, Vector3.up);
+    public static Quaternion LookRotation(Vector3 forward, Vector3 upwards)
     {
-        Vector3 unit = forward.normalized;
-        if (unit.sqrMagnitude < 1e-8f) return identity;
-        float pitch = -MathF.Asin(Mathf.Clamp(unit.y, -1, 1)) * Mathf.Rad2Deg;
-        float yaw = MathF.Atan2(unit.x, unit.z) * Mathf.Rad2Deg;
-        return Euler(pitch, yaw, 0);
+        Vector3 f = forward.normalized;
+        if (f.sqrMagnitude < 1e-8f) return identity;
+        Vector3 r = Vector3.Cross(upwards, f);
+        if (r.sqrMagnitude < 1e-8f) r = Vector3.Cross(MathF.Abs(f.y) < 0.99f ? Vector3.up : Vector3.forward, f);
+        r = r.normalized;
+        Vector3 u = Vector3.Cross(f, r);
+        return FromBasis(r, u, f);
+    }
+    /// <summary>Rotation that turns direction <paramref name="from"/> into <paramref name="to"/>.</summary>
+    public static Quaternion FromToRotation(Vector3 from, Vector3 to)
+    {
+        Vector3 a = from.normalized, b = to.normalized;
+        if (a.sqrMagnitude < 1e-8f || b.sqrMagnitude < 1e-8f) return identity;
+        float dot = Mathf.Clamp(Vector3.Dot(a, b), -1f, 1f);
+        if (dot > 0.999999f) return identity;
+        if (dot < -0.999999f)
+        {
+            Vector3 axis = Vector3.Cross(Vector3.right, a);
+            if (axis.sqrMagnitude < 1e-6f) axis = Vector3.Cross(Vector3.up, a);
+            return AngleAxis(180f, axis);
+        }
+        return AngleAxis(MathF.Acos(dot) * Mathf.Rad2Deg, Vector3.Cross(a, b));
+    }
+    public static Quaternion Normalize(Quaternion q) => q.normalized;
+    public void ToAngleAxis(out float angle, out Vector3 axis)
+    {
+        Quaternion q = normalized;
+        if (q.w < 0f) q = new Quaternion(-q.x, -q.y, -q.z, -q.w);
+        angle = 2f * MathF.Acos(Mathf.Clamp(q.w, -1f, 1f)) * Mathf.Rad2Deg;
+        float s = MathF.Sqrt(MathF.Max(0f, 1f - q.w * q.w));
+        axis = s < 1e-5f ? Vector3.right : new Vector3(q.x / s, q.y / s, q.z / s);
+    }
+    private static Quaternion FromBasis(Vector3 r, Vector3 u, Vector3 f)
+    {
+        float m00 = r.x, m01 = u.x, m02 = f.x, m10 = r.y, m11 = u.y, m12 = f.y, m20 = r.z, m21 = u.z, m22 = f.z;
+        float trace = m00 + m11 + m22;
+        if (trace > 0f)
+        {
+            float s = MathF.Sqrt(trace + 1f) * 2f;
+            return new Quaternion((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s).normalized;
+        }
+        if (m00 > m11 && m00 > m22)
+        {
+            float s = MathF.Sqrt(1f + m00 - m11 - m22) * 2f;
+            return new Quaternion(0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s).normalized;
+        }
+        if (m11 > m22)
+        {
+            float s = MathF.Sqrt(1f + m11 - m00 - m22) * 2f;
+            return new Quaternion((m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s).normalized;
+        }
+        float t = MathF.Sqrt(1f + m22 - m00 - m11) * 2f;
+        return new Quaternion((m02 + m20) / t, (m12 + m21) / t, 0.25f * t, (m10 - m01) / t).normalized;
     }
 
     public Vector3 eulerAngles
@@ -183,10 +237,21 @@ public struct Quaternion
         get
         {
             Quaternion q = normalized;
-            float sinY = Mathf.Clamp(2f*(q.y*q.w - q.x*q.z), -1f, 1f);
-            float yDeg = MathF.Asin(sinY) * Mathf.Rad2Deg;
-            float xDeg = MathF.Atan2(2f*(q.x*q.w + q.y*q.z), 1f - 2f*(q.x*q.x + q.y*q.y)) * Mathf.Rad2Deg;
-            float zDeg = MathF.Atan2(2f*(q.y*q.x + q.z*q.w), 1f - 2f*(q.x*q.x + q.z*q.z)) * Mathf.Rad2Deg;
+            // Inverse of Euler(): q = Y * X * Z.
+            float sinX = Mathf.Clamp(2f*(q.w*q.x - q.y*q.z), -1f, 1f);
+            float xDeg = MathF.Asin(sinX) * Mathf.Rad2Deg;
+            float yDeg, zDeg;
+            if (MathF.Abs(sinX) > 0.99999f)
+            {
+                // Gimbal lock: Y and Z rotate around the same axis, so fold everything into Y.
+                yDeg = MathF.Atan2(-2f*(q.x*q.z - q.w*q.y), 1f - 2f*(q.y*q.y + q.z*q.z)) * Mathf.Rad2Deg;
+                zDeg = 0f;
+            }
+            else
+            {
+                yDeg = MathF.Atan2(2f*(q.x*q.z + q.w*q.y), 1f - 2f*(q.x*q.x + q.y*q.y)) * Mathf.Rad2Deg;
+                zDeg = MathF.Atan2(2f*(q.x*q.y + q.w*q.z), 1f - 2f*(q.x*q.x + q.z*q.z)) * Mathf.Rad2Deg;
+            }
             // Normalize into [0, 360) so values round-trip through Transform.rotation predictably.
             return new Vector3(Wrap360(xDeg), Wrap360(yDeg), Wrap360(zDeg));
         }
@@ -214,12 +279,12 @@ public struct Quaternion
         float s1 = sinTheta / sinTheta0;
         return new Quaternion(s0*a.x+s1*b.x, s0*a.y+s1*b.y, s0*a.z+s1*b.z, s0*a.w+s1*b.w).normalized;
     }
-    public Quaternion inverse => new(-x, -y, -z, w);
+    public Quaternion inverse { get { Quaternion n = normalized; return new(-n.x, -n.y, -n.z, n.w); } }
     public static Quaternion Inverse(Quaternion q) => q.inverse;
     public static Quaternion RotateTowards(Quaternion current, Quaternion target, float maxDegreesDelta)
     {
         float angle = Angle(current, target);
-        return angle <= maxDegreesDelta ? target : Slerp(current, target, maxDegreesDelta / angle);
+        return angle <= maxDegreesDelta || angle < 1e-4f ? target : Slerp(current, target, maxDegreesDelta / angle);
     }
     public static float Angle(Quaternion a, Quaternion b)
     {
@@ -249,69 +314,182 @@ public abstract class Component
     public string name => gameObject.name;
     public T? GetComponent<T>() where T : Component => gameObject.GetComponent<T>();
     public T[] GetComponents<T>() where T : Component => gameObject.GetComponents<T>();
+    public bool TryGetComponent<T>(out T? component) where T : Component => gameObject.TryGetComponent(out component);
+    public T? GetComponentInChildren<T>(bool includeInactive = false) where T : Component => gameObject.GetComponentInChildren<T>(includeInactive);
+    public T[] GetComponentsInChildren<T>(bool includeInactive = false) where T : Component => gameObject.GetComponentsInChildren<T>(includeInactive);
+    public T? GetComponentInParent<T>() where T : Component => gameObject.GetComponentInParent<T>();
+    public string tag { get => gameObject.tag; set => gameObject.tag = value; }
+    public bool CompareTag(string other) => gameObject.CompareTag(other);
     public void Bind(GameObject owner) => gameObject = owner;
+
+    // Unity-style shortcuts so scripts can call Destroy(gameObject) / Instantiate(prefab) without a prefix.
+    public static void Destroy(GameObject? target, float delaySeconds = 0f) => GameObject.Destroy(target, delaySeconds);
+    public static void Destroy(Component? target) => GameObject.Destroy(target);
+    public static GameObject? Instantiate(GameObject original) => GameObject.Instantiate(original);
+    public static GameObject? Instantiate(GameObject original, Transform? parent) => GameObject.Instantiate(original, parent);
+    public static GameObject? Instantiate(GameObject original, Vector3 position, Quaternion rotation) => GameObject.Instantiate(original, position, rotation);
+    public static GameObject? Instantiate(GameObject original, Vector3 position, Quaternion rotation, Transform? parent) => GameObject.Instantiate(original, position, rotation, parent);
 }
 
-/// <summary>Transform component. Position is world-space; rotation is Euler degrees; scale is local scale.</summary>
-public sealed class Transform : Component
+/// <summary>Transform component. localPosition/localEulerAngles/localScale are relative to the parent (the values
+/// the native scene stores); position/rotation/eulerAngles are world-space and follow the parent chain.
+/// For root objects local and world values are identical.</summary>
+public sealed class Transform : Component, System.Collections.Generic.IEnumerable<Transform>
 {
     private readonly RuntimeObjectData _state;
     internal Transform(RuntimeObjectData state) => _state = state;
-    public Vector3 position { get => _state.Position; set => _state.Position = value; }
-    public Vector3 localPosition { get => position; set => position = value; }
-    public Vector3 rotation { get => _state.Rotation; set => _state.Rotation = value; }
-    public Vector3 eulerAngles { get => rotation; set => rotation = value; }
-    public Vector3 localEulerAngles { get => rotation; set => rotation = value; }
-    public Quaternion quaternion { get => Quaternion.Euler(rotation); set => rotation = value.eulerAngles; }
-    public Vector3 localScale { get => _state.Scale; set => _state.Scale = value; }
-    public Vector3 lossyScale { get => _state.Scale; }
-    public Vector3 forward => RotateDirection(Vector3.forward);
-    public Vector3 right => RotateDirection(Vector3.right);
-    public Vector3 up => RotateDirection(Vector3.up);
 
+    public Vector3 localPosition { get => _state.Position; set => _state.Position = value; }
+    public Vector3 localEulerAngles { get => _state.Rotation; set => _state.Rotation = value; }
+    public Quaternion localRotation { get => Quaternion.Euler(_state.Rotation); set => _state.Rotation = value.eulerAngles; }
+    public Vector3 localScale { get => _state.Scale; set => _state.Scale = value; }
+
+    public Vector3 position
+    {
+        get => parent is { } p ? p.TransformPoint(localPosition) : localPosition;
+        set => localPosition = parent is { } p ? p.InverseTransformPoint(value) : value;
+    }
+    /// <summary>World rotation as a quaternion (Unity's Transform.rotation).</summary>
+    public Quaternion quaternion
+    {
+        get => parent is { } p ? p.quaternion * localRotation : localRotation;
+        set => localRotation = parent is { } p ? p.quaternion.inverse * value : value;
+    }
+    /// <summary>World rotation as Euler degrees (kept as Vector3 for compatibility with existing scripts).</summary>
+    public Vector3 rotation
+    {
+        get => parent is null ? localEulerAngles : quaternion.eulerAngles;
+        set { if (parent is null) localEulerAngles = value; else quaternion = Quaternion.Euler(value); }
+    }
+    public Vector3 eulerAngles { get => rotation; set => rotation = value; }
+    public Vector3 lossyScale
+    {
+        get
+        {
+            Vector3 s = localScale;
+            for (Transform? p = parent; p is not null; p = p.parent)
+                s = new Vector3(s.x * p.localScale.x, s.y * p.localScale.y, s.z * p.localScale.z);
+            return s;
+        }
+    }
+    public Vector3 forward { get => quaternion * Vector3.forward; set => quaternion = Quaternion.LookRotation(value); }
+    public Vector3 right => quaternion * Vector3.right;
+    public Vector3 up => quaternion * Vector3.up;
+
+    // ---- Hierarchy ----
+    public Transform? parent
+    {
+        get => _state.ParentId == -1 ? null : Scene.FindById(_state.ParentId)?.transform;
+        set => SetParent(value, true);
+    }
+    public Transform root { get { Transform t = this; while (t.parent is { } p) t = p; return t; } }
+    public int childCount => Children().Count();
+    public Transform GetChild(int index)
+    {
+        var children = Children().ToArray();
+        if (index < 0 || index >= children.Length) throw new ArgumentOutOfRangeException(nameof(index), $"'{name}' has {children.Length} children.");
+        return children[index];
+    }
+    public Transform? Find(string childName)
+    {
+        // Supports "Child/GrandChild" paths like Unity.
+        Transform? current = this;
+        foreach (string part in childName.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = current?.Children().FirstOrDefault(c => string.Equals(c.name, part, StringComparison.Ordinal));
+            if (current is null) return null;
+        }
+        return current;
+    }
+    public bool IsChildOf(Transform other)
+    {
+        for (Transform? t = this; t is not null; t = t.parent) if (ReferenceEquals(t, other)) return true;
+        return false;
+    }
+    public void SetParent(Transform? newParent, bool worldPositionStays = true)
+    {
+        if (newParent is not null && newParent.IsChildOf(this))
+        {
+            Debug.LogWarning($"Cannot parent '{name}' to '{newParent.name}': it would create a hierarchy cycle.");
+            return;
+        }
+        if (ReferenceEquals(parent, newParent)) return;
+        Vector3 worldPosition = position;
+        Quaternion worldRotation = quaternion;
+        Vector3 worldScale = lossyScale;
+        _state.ParentId = newParent?.gameObject.State.Id ?? -1;
+        if (!worldPositionStays) return;
+        position = worldPosition;
+        quaternion = worldRotation;
+        Vector3 parentScale = newParent?.lossyScale ?? Vector3.one;
+        localScale = new Vector3(SafeDivide(worldScale.x, parentScale.x), SafeDivide(worldScale.y, parentScale.y), SafeDivide(worldScale.z, parentScale.z));
+    }
+    public void DetachChildren() { foreach (var child in Children().ToArray()) child.SetParent(null, true); }
+    public System.Collections.Generic.IEnumerator<Transform> GetEnumerator() => Children().ToList().GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    internal IEnumerable<Transform> Children()
+    {
+        int id = _state.Id;
+        return Scene.AllGameObjects.Where(o => o.State.ParentId == id && !ReferenceEquals(o.State, _state)).Select(o => o.transform);
+    }
+
+    // ---- Movement ----
+    public void SetPositionAndRotation(Vector3 worldPosition, Quaternion worldRotation) { position = worldPosition; quaternion = worldRotation; }
     public void Translate(Vector3 translation, Space relativeTo = Space.Self)
-        => position += relativeTo == Space.World ? translation : RotateDirection(translation);
+        => position += relativeTo == Space.World ? translation : TransformDirection(translation);
+    public void Translate(float x, float y, float z, Space relativeTo = Space.Self) => Translate(new Vector3(x, y, z), relativeTo);
     public void Rotate(Vector3 eulerDegrees, Space relativeTo = Space.Self)
-        => rotation += eulerDegrees;
+    {
+        Quaternion delta = Quaternion.Euler(eulerDegrees);
+        if (relativeTo == Space.Self) localRotation = localRotation * delta;
+        else quaternion = delta * quaternion;
+    }
     public void Rotate(float xAngle, float yAngle, float zAngle, Space relativeTo = Space.Self)
         => Rotate(new Vector3(xAngle, yAngle, zAngle), relativeTo);
-    public void Rotate(Quaternion orientation) => quaternion = orientation * quaternion;
-    public Vector3 TransformDirection(Vector3 direction) => RotateDirection(direction);
-    public Vector3 InverseTransformDirection(Vector3 direction)
+    public void Rotate(Vector3 axis, float angle, Space relativeTo = Space.Self)
     {
-        // Inverse of the XYZ Euler rotation; rotation is applied in reverse order.
-        float rx = -rotation.x * Mathf.Deg2Rad, ry = -rotation.y * Mathf.Deg2Rad, rz = -rotation.z * Mathf.Deg2Rad;
-        float cx = MathF.Cos(rx), sx = MathF.Sin(rx), cy = MathF.Cos(ry), sy = MathF.Sin(ry), cz = MathF.Cos(rz), sz = MathF.Sin(rz);
-        float x1 = cz*direction.x - sz*direction.y, y1 = sz*direction.x + cz*direction.y, z1 = direction.z;
-        float x2 = cy*x1 + sy*z1, y2 = y1, z2 = -sy*x1 + cy*z1;
-        return new Vector3(x2, cx*y2 - sx*z2, sx*y2 + cx*z2);
+        if (relativeTo == Space.Self) localRotation = localRotation * Quaternion.AngleAxis(angle, axis);
+        else quaternion = Quaternion.AngleAxis(angle, axis) * quaternion;
     }
-    public Vector3 TransformPoint(Vector3 point) => position + RotateDirection(new Vector3(point.x*localScale.x, point.y*localScale.y, point.z*localScale.z));
+    public void Rotate(Quaternion orientation) => quaternion = orientation * quaternion;
+    public void RotateAround(Vector3 point, Vector3 axis, float angle)
+    {
+        Quaternion q = Quaternion.AngleAxis(angle, axis);
+        position = point + q * (position - point);
+        quaternion = q * quaternion;
+    }
+    public void LookAt(Vector3 target) => LookAt(target, Vector3.up);
+    public void LookAt(Vector3 target, Vector3 worldUp)
+    {
+        Vector3 direction = target - position;
+        if (direction.sqrMagnitude < 1e-8f) return;
+        quaternion = Quaternion.LookRotation(direction, worldUp);
+    }
+    public void LookAt(Transform target) { if (target is not null) LookAt(target.position, Vector3.up); }
+
+    // ---- Space conversion ----
+    public Vector3 TransformDirection(Vector3 direction) => quaternion * direction;
+    public Vector3 InverseTransformDirection(Vector3 direction) => quaternion.inverse * direction;
+    public Vector3 TransformVector(Vector3 vector)
+    {
+        Vector3 local = localRotation * Scale(vector, localScale);
+        return parent is { } p ? p.TransformVector(local) : local;
+    }
+    public Vector3 TransformPoint(Vector3 point)
+    {
+        // Same composition as the renderer: scale, rotate, translate, then the parent's transform.
+        Vector3 local = localRotation * Scale(point, localScale) + localPosition;
+        return parent is { } p ? p.TransformPoint(local) : local;
+    }
     public Vector3 InverseTransformPoint(Vector3 point)
     {
-        Vector3 local = InverseTransformDirection(point - position);
-        return new Vector3(MathF.Abs(localScale.x)<1e-6f?0:local.x/localScale.x,
-            MathF.Abs(localScale.y)<1e-6f?0:local.y/localScale.y,
-            MathF.Abs(localScale.z)<1e-6f?0:local.z/localScale.z);
-    }
-    public void LookAt(Vector3 target)
-    {
-        Vector3 direction = (target - position).normalized;
-        if (direction.sqrMagnitude < 1e-8f) return;
-        float pitch = -MathF.Asin(Mathf.Clamp(direction.y, -1, 1)) * Mathf.Rad2Deg;
-        float yaw = MathF.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
-        rotation = new Vector3(pitch, yaw, 0);
+        Vector3 inParent = parent is { } p ? p.InverseTransformPoint(point) : point;
+        Vector3 unrotated = localRotation.inverse * (inParent - localPosition);
+        return new Vector3(SafeDivide(unrotated.x, localScale.x), SafeDivide(unrotated.y, localScale.y), SafeDivide(unrotated.z, localScale.z));
     }
 
-    private Vector3 RotateDirection(Vector3 v)
-    {
-        float rx = rotation.x * Mathf.Deg2Rad, ry = rotation.y * Mathf.Deg2Rad, rz = rotation.z * Mathf.Deg2Rad;
-        float cx = MathF.Cos(rx), sx = MathF.Sin(rx), cy = MathF.Cos(ry), sy = MathF.Sin(ry), cz = MathF.Cos(rz), sz = MathF.Sin(rz);
-        // XYZ Euler rotation, consistent for common movement scripts.
-        float x1 = v.x, y1 = cx*v.y - sx*v.z, z1 = sx*v.y + cx*v.z;
-        float x2 = cy*x1 + sy*z1, y2 = y1, z2 = -sy*x1 + cy*z1;
-        return new Vector3(cz*x2 - sz*y2, sz*x2 + cz*y2, z2);
-    }
+    private static Vector3 Scale(Vector3 a, Vector3 b) => new(a.x * b.x, a.y * b.y, a.z * b.z);
+    private static float SafeDivide(float value, float divisor) => MathF.Abs(divisor) < 1e-6f ? 0f : value / divisor;
 }
 
 /// <summary>Runtime state synchronized with the native DirectX 12 scene each frame.</summary>
@@ -343,6 +521,12 @@ public sealed class RuntimeObjectData
     public float Mass { get; set; } = 1f;
     public bool UseGravity { get; set; } = true;
     public bool IsKinematic { get; set; }
+    /// <summary>Stable id of the parent object, or -1 for root objects.</summary>
+    public int ParentId { get; set; } = -1;
+    public bool ActiveSelf { get; set; } = true;
+    public float CameraFieldOfView { get; set; } = 60f;
+    public float CameraNearClip { get; set; } = 0.05f;
+    public float CameraFarClip { get; set; } = 1000f;
 
     public RuntimeObjectData Clone(int newId)
         => new()
@@ -355,7 +539,9 @@ public sealed class RuntimeObjectData
             LightInnerAngle = LightInnerAngle, LightOuterAngle = LightOuterAngle,
             Tag = Tag, Layer = Layer, ColliderType = ColliderType, ColliderSize = ColliderSize,
             IsTrigger = IsTrigger, HasRigidbody = HasRigidbody, Mass = Mass,
-            UseGravity = UseGravity, IsKinematic = IsKinematic
+            UseGravity = UseGravity, IsKinematic = IsKinematic,
+            ParentId = ParentId, ActiveSelf = ActiveSelf, CameraFieldOfView = CameraFieldOfView,
+            CameraNearClip = CameraNearClip, CameraFarClip = CameraFarClip
         };
 
     public void CopyFrom(RuntimeObjectData value)
@@ -369,6 +555,8 @@ public sealed class RuntimeObjectData
         Tag=value.Tag; Layer=value.Layer; ColliderType=value.ColliderType; ColliderSize=value.ColliderSize;
         IsTrigger=value.IsTrigger; HasRigidbody=value.HasRigidbody; Mass=value.Mass;
         UseGravity=value.UseGravity; IsKinematic=value.IsKinematic;
+        ParentId=value.ParentId; ActiveSelf=value.ActiveSelf; CameraFieldOfView=value.CameraFieldOfView;
+        CameraNearClip=value.CameraNearClip; CameraFarClip=value.CameraFarClip;
     }
 }
 
@@ -379,7 +567,21 @@ public sealed class GameObject
     public string name { get => State.Name; set => State.Name = value; }
     public string tag { get => State.Tag; set => State.Tag = string.IsNullOrWhiteSpace(value) ? "Untagged" : value.Trim(); }
     public int layer { get => State.Layer; set => State.Layer = (int)Mathf.Clamp(value, 0, 31); }
-    public bool activeSelf { get; private set; } = true;
+    /// <summary>Local active flag set by SetActive (synchronized with the renderer).</summary>
+    public bool activeSelf => State.ActiveSelf;
+    /// <summary>False when this object or any of its parents is inactive.</summary>
+    public bool activeInHierarchy
+    {
+        get
+        {
+            int guard = 256;
+            for (Transform? t = transform; t is not null && guard-- > 0; t = t.parent)
+                if (!t.gameObject.State.ActiveSelf) return false;
+            return true;
+        }
+    }
+    /// <summary>True once Destroy has been called on this object.</summary>
+    public bool isDestroyed { get; internal set; }
     public Transform transform { get; }
 
     public GameObject(RuntimeObjectData state)
@@ -396,12 +598,30 @@ public sealed class GameObject
         RefreshLightComponent();
     }
 
-    public void SetActive(bool value) => activeSelf = value;
+    public void SetActive(bool value) => State.ActiveSelf = value;
     public bool CompareTag(string other) => string.Equals(tag, other, StringComparison.Ordinal);
 
     public T? GetComponent<T>() where T : Component => _components.OfType<T>().FirstOrDefault();
     public Component? GetComponent(Type componentType) => _components.FirstOrDefault(componentType.IsInstanceOfType);
     public T[] GetComponents<T>() where T : Component => _components.OfType<T>().ToArray();
+    public T? GetComponentInChildren<T>(bool includeInactive = false) where T : Component
+        => SelfAndDescendants(includeInactive).Select(o => o.GetComponent<T>()).FirstOrDefault(c => c is not null);
+    public T[] GetComponentsInChildren<T>(bool includeInactive = false) where T : Component
+        => SelfAndDescendants(includeInactive).SelectMany(o => o.GetComponents<T>()).ToArray();
+    public T? GetComponentInParent<T>() where T : Component
+    {
+        for (Transform? t = transform; t is not null; t = t.parent)
+            if (t.gameObject.GetComponent<T>() is { } found) return found;
+        return null;
+    }
+    internal IEnumerable<GameObject> SelfAndDescendants(bool includeInactive = true)
+    {
+        if (!includeInactive && !activeInHierarchy) yield break;
+        yield return this;
+        foreach (var child in transform.Children().ToArray())
+            foreach (var descendant in child.gameObject.SelfAndDescendants(includeInactive))
+                yield return descendant;
+    }
     public bool TryGetComponent<T>(out T? component) where T : Component
     {
         component = GetComponent<T>();
@@ -415,9 +635,9 @@ public sealed class GameObject
         if (component is Collider) State.HasCollider = true;
         return component;
     }
-    public bool RemoveComponent<T>() where T : Component
+    public bool RemoveComponent<T>() where T : Component => RemoveComponent(GetComponent<T>());
+    public bool RemoveComponent(Component? component)
     {
-        var component = GetComponent<T>();
         if (component is null || component is Transform || component is MeshRenderer && State.HasMeshRenderer || component is Light && State.LightType != 0)
             return false;
         if (!_components.Remove(component)) return false;
@@ -503,13 +723,28 @@ public sealed class GameObject
     public static GameObject? FindWithTag(string targetTag) => Scene.FindWithTag(targetTag);
     public static GameObject[] FindGameObjectsWithTag(string targetTag) => Scene.FindGameObjectsWithTag(targetTag);
 
-    /// <summary>Clones an existing object. The native scene receives a duplicate of the source object at the same transform.</summary>
+    /// <summary>Clones an existing object. The native scene receives a duplicate of the source object at the same transform.
+    /// Scripts attached to the source start on the clone in the next frame.</summary>
     public static GameObject? Instantiate(GameObject original)
         => original is null ? null
             : Instantiate(original, original.transform.position, original.transform.rotation, original.transform.localScale);
 
+    public static GameObject? Instantiate(GameObject original, Transform? parent)
+    {
+        var clone = Instantiate(original);
+        if (clone is not null && parent is not null) clone.transform.SetParent(parent, false);
+        return clone;
+    }
+
     public static GameObject? Instantiate(GameObject original, Vector3 position, Quaternion rotation)
         => original is null ? null : Instantiate(original, position, rotation.eulerAngles, original.State.Scale);
+
+    public static GameObject? Instantiate(GameObject original, Vector3 position, Quaternion rotation, Transform? parent)
+    {
+        var clone = Instantiate(original, position, rotation);
+        if (clone is not null && parent is not null) clone.transform.SetParent(parent, true);
+        return clone;
+    }
 
     public static GameObject? Instantiate(GameObject original, Vector3 position, Vector3 eulerAnglesDegrees, Vector3 scale)
     {
@@ -519,20 +754,36 @@ public sealed class GameObject
         cloneState.Position = position;
         cloneState.Rotation = eulerAnglesDegrees;
         cloneState.Scale = scale;
+        cloneState.ParentId = -1;
         var clone = Scene.RegisterTemporary(cloneState);
         ForgeRuntimeCommands.EnqueueInstantiate(tempId, original.State.Id, cloneState.Name,
             position, eulerAnglesDegrees, scale);
         return clone;
     }
 
-    public static void Destroy(GameObject? target)
+    /// <summary>Destroys the object and all of its children at the end of the frame (or after <paramref name="delaySeconds"/>).</summary>
+    public static void Destroy(GameObject? target, float delaySeconds = 0f)
+    {
+        if (target is null || target.isDestroyed) return;
+        if (delaySeconds > 0f) { Scene.ScheduleDestroy(target, delaySeconds); return; }
+        foreach (var go in target.SelfAndDescendants().ToArray())
+        {
+            go.isDestroyed = true;
+            int id = go.State.Id;
+            Scene.Remove(id);
+            ForgeRuntimeCommands.EnqueueDestroy(id);
+        }
+    }
+    /// <summary>Removes a single component. Scripts receive OnDisable/OnDestroy at the end of the frame;
+    /// destroying the Transform is not allowed (destroy the GameObject instead).</summary>
+    public static void Destroy(Component? target)
     {
         if (target is null) return;
-        int id = target.State.Id;
-        Scene.Remove(id);
-        if (id >= 0) ForgeRuntimeCommands.EnqueueDestroy(id);
+        if (target is Transform) { Debug.LogError("Destroying the Transform component is not allowed. Use Destroy(gameObject)."); return; }
+        if (target is MonoBehaviour behaviour) { behaviour.DestroyRequested = true; return; }
+        if (!target.gameObject.RemoveComponent(target))
+            Debug.LogWarning($"{target.GetType().Name} on '{target.gameObject.name}' is owned by the native scene and cannot be removed at runtime.");
     }
-    public static void Destroy(Component? target) { if (target is not null) Destroy(target.gameObject); }
     public static void DestroyImmediate(GameObject? target) => Destroy(target);
 }
 
@@ -620,6 +871,8 @@ public sealed class CapsuleCollider : Collider
 }
 
 /// <summary>Rigid body synchronized with the native object. Velocity is simulated by the scripting runtime.</summary>
+public enum ForceMode { Force, Acceleration, Impulse, VelocityChange }
+
 public sealed class Rigidbody : Component
 {
     public Vector3 velocity { get; set; } = Vector3.zero;
@@ -628,6 +881,19 @@ public sealed class Rigidbody : Component
     public bool useGravity { get => gameObject.State.UseGravity; set => gameObject.State.UseGravity = value; }
     public bool isKinematic { get => gameObject.State.IsKinematic; set => gameObject.State.IsKinematic = value; }
     public void AddForce(Vector3 force) { if (!isKinematic) _pendingForce += force; }
+    public void AddForce(Vector3 force, ForceMode mode)
+    {
+        if (isKinematic) return;
+        switch (mode)
+        {
+            case ForceMode.Acceleration: _pendingForce += force * MathF.Max(0.001f, mass); break;
+            case ForceMode.Impulse: velocity += force / MathF.Max(0.001f, mass); break;
+            case ForceMode.VelocityChange: velocity += force; break;
+            default: _pendingForce += force; break;
+        }
+    }
+    public void MovePosition(Vector3 worldPosition) => transform.position = worldPosition;
+    public void MoveRotation(Quaternion worldRotation) => transform.quaternion = worldRotation;
     public void AddImpulse(Vector3 impulse) { if (!isKinematic) velocity += impulse / MathF.Max(0.001f, mass); }
     private Vector3 _pendingForce;
     internal void Simulate(float dt)
@@ -647,13 +913,36 @@ public sealed class Rigidbody : Component
     }
 }
 
-/// <summary>Simple camera component metadata, usable from gameplay scripts.</summary>
+/// <summary>Camera component. Field of view and clip planes are synchronized with the native camera object.</summary>
 public sealed class Camera : Component
 {
-    public float fieldOfView { get; set; } = 60f;
-    public float nearClipPlane { get; set; } = 0.05f;
-    public float farClipPlane { get; set; } = 1000f;
+    public float fieldOfView { get => gameObject.State.CameraFieldOfView; set => gameObject.State.CameraFieldOfView = Mathf.Clamp(value, 20f, 110f); }
+    public float nearClipPlane { get => gameObject.State.CameraNearClip; set => gameObject.State.CameraNearClip = Mathf.Clamp(value, 0.01f, 100f); }
+    public float farClipPlane { get => gameObject.State.CameraFarClip; set => gameObject.State.CameraFarClip = MathF.Max(nearClipPlane + 0.1f, value); }
+    public float aspect => Screen.height > 0 ? (float)Screen.width / Screen.height : 16f / 9f;
+    /// <summary>First active camera in the scene.</summary>
     public static Camera? main => Scene.FindObjectOfType<Camera>();
+
+    /// <summary>Ray from the camera through a viewport pixel (origin at the top-left, like Input.mousePosition).</summary>
+    public Ray ScreenPointToRay(Vector3 screenPosition)
+    {
+        float width = MathF.Max(1, Screen.width), height = MathF.Max(1, Screen.height);
+        float ndcX = screenPosition.x / width * 2f - 1f;
+        float ndcY = 1f - screenPosition.y / height * 2f;
+        float tanHalf = MathF.Tan(fieldOfView * 0.5f * Mathf.Deg2Rad);
+        Vector3 local = new(ndcX * tanHalf * aspect, ndcY * tanHalf, 1f);
+        return new Ray(transform.position, transform.TransformDirection(local));
+    }
+    /// <summary>Projects a world point to viewport pixels (top-left origin); z is the distance along the camera's forward axis.</summary>
+    public Vector3 WorldToScreenPoint(Vector3 worldPosition)
+    {
+        Vector3 local = transform.InverseTransformDirection(worldPosition - transform.position);
+        float tanHalf = MathF.Tan(fieldOfView * 0.5f * Mathf.Deg2Rad);
+        if (MathF.Abs(local.z) < 1e-6f) return new Vector3(0, 0, 0);
+        float ndcX = local.x / (local.z * tanHalf * aspect);
+        float ndcY = local.y / (local.z * tanHalf);
+        return new Vector3((ndcX + 1f) * 0.5f * Screen.width, (1f - ndcY) * 0.5f * Screen.height, local.z);
+    }
 }
 
 /// <summary>WAV playback via the Windows multimedia API. Supports one active PlaySound stream per process.</summary>
@@ -733,16 +1022,19 @@ public static class Physics
     private static readonly Dictionary<long, (Collider A, Collider B)> TriggerContacts = new();
     private static long PairKey(int a, int b) => a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
 
-    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hit, float maxDistance = 1000f)
-        => Raycast(new Ray(origin, direction), out hit, maxDistance);
+    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hit, float maxDistance = 1000f, int layerMask = -1)
+        => Raycast(new Ray(origin, direction), out hit, maxDistance, layerMask);
+    public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance = 1000f, int layerMask = -1)
+        => Raycast(new Ray(origin, direction), out _, maxDistance, layerMask);
 
-    public static bool Raycast(Ray ray, out RaycastHit hit, float maxDistance = 1000f)
+    public static bool Raycast(Ray ray, out RaycastHit hit, float maxDistance = 1000f, int layerMask = -1)
     {
         hit = default;
         float closest = MathF.Max(0, maxDistance);
         bool found = false;
         foreach (var go in Scene.gameObjects)
         {
+            if (!go.activeInHierarchy || (layerMask & (1 << go.layer)) == 0) continue;
             var collider = go.GetComponent<Collider>();
             if (collider is null || !collider.enabled) continue;
             float radius = collider.effectiveRadius;
@@ -760,11 +1052,12 @@ public static class Physics
         }
         return found;
     }
-    public static Collider[] OverlapSphere(Vector3 center, float radius)
+    public static Collider[] OverlapSphere(Vector3 center, float radius, int layerMask = -1)
     {
         var results = new List<Collider>();
         foreach (var go in Scene.gameObjects)
         {
+            if (!go.activeInHierarchy || (layerMask & (1 << go.layer)) == 0) continue;
             var collider = go.GetComponent<Collider>();
             if (collider is null || !collider.enabled) continue;
             if (Vector3.Distance(center, go.transform.position) <= radius + collider.effectiveRadius)
@@ -774,13 +1067,14 @@ public static class Physics
     }
     public static void SimulateRuntimeStep(float fixedDeltaTime)
     {
-        foreach (var go in Scene.gameObjects)
-            foreach (var body in go.GetComponents<Rigidbody>()) body.Simulate(fixedDeltaTime);
+        foreach (var go in Scene.gameObjects.ToArray())
+            if (go.activeInHierarchy)
+                foreach (var body in go.GetComponents<Rigidbody>()) body.Simulate(fixedDeltaTime);
 
         var participants = new List<(GameObject Go, Collider Col)>();
         foreach (var go in Scene.gameObjects)
         {
-            if (!go.activeSelf) continue;
+            if (!go.activeInHierarchy) continue;
             var col = go.GetComponent<Collider>();
             if (col is null || !col.enabled) continue;
             participants.Add((go, col));
@@ -850,9 +1144,9 @@ public static class Physics
         CloseOldContacts(CollisionContacts, liveCollision, false);
         CloseOldContacts(TriggerContacts, liveTrigger, true);
 
-        foreach (var go in Scene.gameObjects)
+        foreach (var go in Scene.gameObjects.ToArray())
         {
-            if (!go.activeSelf) continue;
+            if (!go.activeInHierarchy) continue;
             foreach (var force in go.GetComponents<ConstantForce>()) force.Simulate(fixedDeltaTime);
             foreach (var auto in go.GetComponents<AutoDestroy>()) auto.Tick(fixedDeltaTime);
             foreach (var aim in go.GetComponents<LookAtTarget>()) aim.Apply();
@@ -875,8 +1169,12 @@ public static class Physics
         var rb = go.GetComponent<Rigidbody>();
         if (rb is { enabled: true, isKinematic: false }) rb.velocity += velocityChange;
     }
+    private enum ContactPhase { Enter, Stay, Exit }
     private static void DispatchCollision(GameObject target, GameObject other, Collider otherCollider,
         Vector3 relativeVelocity, Vector3 impulse, ContactPoint[] contacts, bool entered)
+        => DispatchCollision(target, other, otherCollider, relativeVelocity, impulse, contacts, entered ? ContactPhase.Enter : ContactPhase.Stay);
+    private static void DispatchCollision(GameObject target, GameObject other, Collider otherCollider,
+        Vector3 relativeVelocity, Vector3 impulse, ContactPoint[] contacts, ContactPhase phase)
     {
         var collision = new Collision
         {
@@ -888,18 +1186,27 @@ public static class Physics
         };
         foreach (var script in target.GetComponents<MonoBehaviour>())
         {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            if (entered) script.OnCollisionEnter(collision);
-            else script.OnCollisionStay(collision);
+            if (!script.enabled || !script.gameObject.activeInHierarchy) continue;
+            try
+            {
+                if (phase == ContactPhase.Enter) script.OnCollisionEnter(collision);
+                else if (phase == ContactPhase.Stay) script.OnCollisionStay(collision);
+                else script.OnCollisionExit(collision);
+            }
+            catch (Exception ex) { Debug.LogError($"{script.GetType().Name}.OnCollision{phase}() on '{target.name}': {ex.GetBaseException().Message}"); }
         }
     }
     private static void DispatchTrigger(GameObject target, Collider other, bool entered)
     {
         foreach (var script in target.GetComponents<MonoBehaviour>())
         {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            if (entered) script.OnTriggerEnter(other);
-            else script.OnTriggerStay(other);
+            if (!script.enabled || !script.gameObject.activeInHierarchy) continue;
+            try
+            {
+                if (entered) script.OnTriggerEnter(other);
+                else script.OnTriggerStay(other);
+            }
+            catch (Exception ex) { Debug.LogError($"{script.GetType().Name}.OnTrigger{(entered ? "Enter" : "Stay")}() on '{target.name}': {ex.GetBaseException().Message}"); }
         }
     }
     private static void CloseOldContacts(Dictionary<long, (Collider A, Collider B)> active, HashSet<long> live, bool trigger)
@@ -919,8 +1226,8 @@ public static class Physics
             else
             {
                 var contacts = new[] { new ContactPoint { point = goA.transform.position, normal = Vector3.zero } };
-                DispatchCollision(goA, goB, pair.B, Vector3.zero, Vector3.zero, contacts, false);
-                DispatchCollision(goB, goA, pair.A, Vector3.zero, Vector3.zero, contacts, false);
+                DispatchCollision(goA, goB, pair.B, Vector3.zero, Vector3.zero, contacts, ContactPhase.Exit);
+                DispatchCollision(goB, goA, pair.A, Vector3.zero, Vector3.zero, contacts, ContactPhase.Exit);
             }
         }
     }
@@ -928,8 +1235,9 @@ public static class Physics
     {
         foreach (var script in target.GetComponents<MonoBehaviour>())
         {
-            if (!script.enabled || !script.gameObject.activeSelf) continue;
-            script.OnTriggerExit(other);
+            if (!script.enabled || !script.gameObject.activeInHierarchy) continue;
+            try { script.OnTriggerExit(other); }
+            catch (Exception ex) { Debug.LogError($"{script.GetType().Name}.OnTriggerExit() on '{target.name}': {ex.GetBaseException().Message}"); }
         }
     }
 }
@@ -967,7 +1275,7 @@ public sealed class LookAtTarget : Component
     public GameObject? target { get; set; }
     internal void Apply()
     {
-        if (!enabled || target is null || !target.activeSelf) return;
+        if (!enabled || target is null || !target.activeInHierarchy) return;
         Vector3 direction = target.transform.position - transform.position;
         if (direction.sqrMagnitude < 1e-8f) return;
         transform.rotation = Quaternion.LookRotation(direction).eulerAngles;
@@ -978,6 +1286,18 @@ public sealed class LookAtTarget : Component
 public abstract class MonoBehaviour : Component
 {
     private readonly List<Coroutine> _coroutines = new();
+    private readonly List<ScheduledInvoke> _invokes = new();
+    private sealed class ScheduledInvoke
+    {
+        public string MethodName = "";
+        public Action Callback = null!;
+        public float Remaining;
+        public float RepeatRate = -1f;
+    }
+
+    /// <summary>Set by Destroy(this); the host runs OnDisable/OnDestroy and removes the script at the end of the frame.</summary>
+    internal bool DestroyRequested { get; set; }
+    public bool isActiveAndEnabled => enabled && !DestroyRequested && gameObject.activeInHierarchy;
 
     public virtual void Awake() { }
     public virtual void OnEnable() { }
@@ -994,32 +1314,100 @@ public abstract class MonoBehaviour : Component
     public virtual void OnTriggerStay(Collider other) { }
     public virtual void OnTriggerExit(Collider other) { }
 
+    public static void print(object? message) => Debug.Log(message);
+
+    // ---- Coroutines ----
+    /// <summary>Starts a coroutine. It runs immediately until its first yield, then resumes after Update every frame
+    /// (null / WaitForEndOfFrame / WaitForFixedUpdate), after a delay (WaitForSeconds, WaitForSecondsRealtime),
+    /// when a condition holds (WaitUntil, WaitWhile, CustomYieldInstruction) or when a nested coroutine finishes.</summary>
     public Coroutine StartCoroutine(System.Collections.IEnumerator routine)
     {
         var c = new Coroutine(routine);
         _coroutines.Add(c);
+        Step(c);
         return c;
     }
-    public void StopCoroutine(Coroutine coroutine) { if (coroutine != null) coroutine.Running = false; }
-    public void StopAllCoroutines() { foreach (var c in _coroutines) c.Running = false; }
-
-    internal void TickCoroutines(float deltaTime)
+    public void StopCoroutine(Coroutine? coroutine) { if (coroutine != null) coroutine.Stop(); }
+    public void StopCoroutine(System.Collections.IEnumerator? routine)
     {
-        for (int i = _coroutines.Count - 1; i >= 0; i--)
+        if (routine is null) return;
+        foreach (var c in _coroutines) if (ReferenceEquals(c.Enumerator, routine)) c.Stop();
+    }
+    public void StopAllCoroutines() { foreach (var c in _coroutines.ToArray()) c.Stop(); }
+    internal int ActiveCoroutineCount => _coroutines.Count(c => c.Running);
+
+    internal void TickCoroutines(float deltaTime) => TickCoroutines(deltaTime, deltaTime);
+    internal void TickCoroutines(float deltaTime, float unscaledDeltaTime)
+    {
+        foreach (var c in _coroutines.ToArray())
         {
-            var c = _coroutines[i];
-            if (!c.Running) { _coroutines.RemoveAt(i); continue; }
-            if (c.WaitForSecondsRemaining > 0f)
+            if (!c.Running || c.StartedFrame == Time.frameCount) continue;
+            if (c.WaitForSecondsRemaining > 0f) { c.WaitForSecondsRemaining -= deltaTime; if (c.WaitForSecondsRemaining > 0f) continue; }
+            if (c.WaitRealtimeRemaining > 0f) { c.WaitRealtimeRemaining -= unscaledDeltaTime; if (c.WaitRealtimeRemaining > 0f) continue; }
+            if (c.WaitCondition is not null)
             {
-                c.WaitForSecondsRemaining -= deltaTime;
-                continue;
+                bool keepWaiting;
+                try { keepWaiting = c.WaitCondition(); }
+                catch (Exception ex) { LogCoroutineError(ex); c.Stop(); continue; }
+                if (keepWaiting) continue;
+                c.WaitCondition = null;
             }
-            bool moveNext;
-            try { moveNext = c.Enumerator.MoveNext(); } catch { moveNext = false; }
-            if (!moveNext) { _coroutines.RemoveAt(i); continue; }
-            var current = c.Enumerator.Current;
-            if (current is WaitForSeconds wfs) c.WaitForSecondsRemaining = wfs.Seconds;
-            else if (current is WaitForEndOfFrame) { /* resume next frame */ }
+            Step(c);
+        }
+        _coroutines.RemoveAll(c => !c.Running);
+    }
+    private void Step(Coroutine c)
+    {
+        c.StartedFrame = Time.frameCount;
+        bool moveNext;
+        try { moveNext = c.Enumerator.MoveNext(); }
+        catch (Exception ex) { LogCoroutineError(ex); moveNext = false; }
+        if (!moveNext) { c.Stop(); return; }
+        switch (c.Enumerator.Current)
+        {
+            case WaitForSeconds wait: c.WaitForSecondsRemaining = wait.Seconds; break;
+            case WaitForSecondsRealtime wait: c.WaitRealtimeRemaining = wait.Seconds; break;
+            case CustomYieldInstruction custom: c.WaitCondition = () => custom.keepWaiting; break;
+            case Coroutine nested: c.WaitCondition = () => nested.Running; break;
+            case System.Collections.IEnumerator routine:
+                var child = StartCoroutine(routine);
+                c.WaitCondition = () => child.Running;
+                break;
+        }
+    }
+    private void LogCoroutineError(Exception ex)
+        => Debug.LogError($"{GetType().Name} coroutine on '{(gameObject is null ? "?" : gameObject.name)}': {ex.GetBaseException().Message}");
+
+    // ---- Invoke ----
+    /// <summary>Calls a parameterless method of this script after <paramref name="time"/> seconds (scaled time).</summary>
+    public void Invoke(string methodName, float time) => Schedule(methodName, time, -1f);
+    /// <summary>Calls a parameterless method after <paramref name="time"/> seconds and then every <paramref name="repeatRate"/> seconds.</summary>
+    public void InvokeRepeating(string methodName, float time, float repeatRate)
+    {
+        if (repeatRate <= 0f) { Debug.LogError("InvokeRepeating: repeatRate must be greater than zero."); return; }
+        Schedule(methodName, time, repeatRate);
+    }
+    public void CancelInvoke() => _invokes.Clear();
+    public void CancelInvoke(string methodName) => _invokes.RemoveAll(i => i.MethodName == methodName);
+    public bool IsInvoking() => _invokes.Count > 0;
+    public bool IsInvoking(string methodName) => _invokes.Any(i => i.MethodName == methodName);
+    private void Schedule(string methodName, float time, float repeatRate)
+    {
+        var method = GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+        if (method is null) { Debug.LogError($"Invoke: method '{methodName}()' was not found on {GetType().Name}."); return; }
+        _invokes.Add(new ScheduledInvoke { MethodName = methodName, Callback = () => method.Invoke(this, null), Remaining = MathF.Max(0f, time), RepeatRate = repeatRate });
+    }
+    internal void TickInvokes(float deltaTime)
+    {
+        foreach (var invoke in _invokes.ToArray())
+        {
+            if (!_invokes.Contains(invoke)) continue;
+            invoke.Remaining -= deltaTime;
+            if (invoke.Remaining > 0f) continue;
+            if (invoke.RepeatRate > 0f) invoke.Remaining += invoke.RepeatRate;
+            else _invokes.Remove(invoke);
+            try { invoke.Callback(); }
+            catch (Exception ex) { Debug.LogError($"{GetType().Name}.{invoke.MethodName}() (Invoke) on '{gameObject.name}': {ex.GetBaseException().Message}"); }
         }
     }
 }
@@ -1063,15 +1451,23 @@ public static class ForgeRuntimeCommands
 public static class Scene
 {
     private static readonly Dictionary<int, GameObject> Objects = new();
-    private static int NextTempId = -1;
+    private static readonly HashSet<int> JustCreated = new();
+    private static readonly List<(GameObject Target, float Remaining)> DelayedDestroys = new();
+    // Temporary ids start far from -1, which the protocol uses for "no object".
+    private const int FirstTemporaryId = -1000;
+    private static int NextTempId = FirstTemporaryId;
     public static IReadOnlyCollection<GameObject> gameObjects => Objects.Values;
-    public static GameObject? Find(string objectName) => Objects.Values.FirstOrDefault(o => string.Equals(o.name, objectName, StringComparison.Ordinal));
+    internal static IEnumerable<GameObject> AllGameObjects => Objects.Values;
+    private static IEnumerable<GameObject> Active => Objects.Values.Where(o => o.activeInHierarchy);
+    /// <summary>Finds an active object by name (inactive objects are skipped, like Unity).</summary>
+    public static GameObject? Find(string objectName) => Active.FirstOrDefault(o => string.Equals(o.name, objectName, StringComparison.Ordinal));
     public static GameObject? FindWithTag(string targetTag)
-        => Objects.Values.FirstOrDefault(o => string.Equals(o.tag, targetTag, StringComparison.Ordinal));
+        => Active.FirstOrDefault(o => string.Equals(o.tag, targetTag, StringComparison.Ordinal));
     public static GameObject[] FindGameObjectsWithTag(string targetTag)
-        => Objects.Values.Where(o => string.Equals(o.tag, targetTag, StringComparison.Ordinal)).ToArray();
-    public static T? FindObjectOfType<T>() where T : Component => Objects.Values.Select(o => o.GetComponent<T>()).FirstOrDefault(c => c is not null);
-    public static T[] FindObjectsOfType<T>() where T : Component => Objects.Values.SelectMany(o => o.GetComponents<T>()).ToArray();
+        => Active.Where(o => string.Equals(o.tag, targetTag, StringComparison.Ordinal)).ToArray();
+    public static T? FindObjectOfType<T>() where T : Component => Active.Select(o => o.GetComponent<T>()).FirstOrDefault(c => c is not null);
+    public static T[] FindObjectsOfType<T>() where T : Component => Active.SelectMany(o => o.GetComponents<T>()).ToArray();
+    public static GameObject[] GetRootGameObjects() => Objects.Values.Where(o => o.transform.parent is null).ToArray();
 
     public static GameObject? FindById(int id) => Objects.TryGetValue(id, out var value) ? value : null;
     internal static int NextTemporaryId() => NextTempId--;
@@ -1082,6 +1478,31 @@ public static class Scene
         return clone;
     }
     internal static void Remove(int id) => Objects.Remove(id);
+    internal static void Clear()
+    {
+        Objects.Clear(); JustCreated.Clear(); DelayedDestroys.Clear();
+        NextTempId = FirstTemporaryId;
+    }
+
+    internal static void ScheduleDestroy(GameObject target, float delaySeconds)
+    {
+        DelayedDestroys.RemoveAll(d => ReferenceEquals(d.Target, target));
+        DelayedDestroys.Add((target, delaySeconds));
+    }
+    internal static void TickDelayedDestroys(float deltaTime)
+    {
+        if (DelayedDestroys.Count == 0) return;
+        var due = new List<GameObject>();
+        for (int i = DelayedDestroys.Count - 1; i >= 0; --i)
+        {
+            var (target, remaining) = DelayedDestroys[i];
+            remaining -= deltaTime;
+            if (remaining > 0f && !target.isDestroyed) { DelayedDestroys[i] = (target, remaining); continue; }
+            DelayedDestroys.RemoveAt(i);
+            due.Add(target);
+        }
+        foreach (var target in due) GameObject.Destroy(target);
+    }
 
     /// <summary>Re-keys a script-created clone to the id assigned by the native engine (NEWID protocol line).</summary>
     public static void RemapId(int from, int to)
@@ -1090,6 +1511,11 @@ public static class Scene
         Objects.Remove(from);
         gameObject.State.Id = to;
         Objects[to] = gameObject;
+        foreach (var other in Objects.Values)
+            if (other.State.ParentId == from) other.State.ParentId = to;
+        // The native clone only received the spawn transform; keep the script-side state for this frame
+        // so changes made right after Instantiate (name, parent, SetActive...) are sent back instead of lost.
+        JustCreated.Add(to);
     }
 
     public static void SyncObjects(IEnumerable<RuntimeObjectData> values)
@@ -1100,19 +1526,25 @@ public static class Scene
             seen.Add(state.Id);
             if (Objects.TryGetValue(state.Id, out var existing))
             {
-                existing.State.CopyFrom(state);
+                if (!JustCreated.Contains(state.Id)) existing.State.CopyFrom(state);
                 existing.RefreshComponents();
             }
             else Objects[state.Id] = new GameObject(state);
         }
-        foreach (var stale in Objects.Keys.Where(id => !seen.Contains(id)).ToArray()) Objects.Remove(stale);
+        JustCreated.Clear();
+        foreach (var stale in Objects.Keys.Where(id => id >= 0 && !seen.Contains(id)).ToArray())
+        {
+            Objects[stale].isDestroyed = true;
+            Objects.Remove(stale);
+        }
     }
 }
 
 public enum KeyCode
 {
     None=0, Backspace=8, Tab=9, Return=13, Escape=27, Space=32,
-    LeftArrow=37, UpArrow=38, RightArrow=39, DownArrow=40,
+    LeftArrow=37, UpArrow=38, RightArrow=39, DownArrow=40, Delete=46,
+    Alpha0=48, Alpha1=49, Alpha2=50, Alpha3=51, Alpha4=52, Alpha5=53, Alpha6=54, Alpha7=55, Alpha8=56, Alpha9=57,
     A=65, B=66, C=67, D=68, E=69, F=70, G=71, H=72, I=73, J=74, K=75, L=76, M=77,
     N=78, O=79, P=80, Q=81, R=82, S=83, T=84, U=85, V=86, W=87, X=88, Y=89, Z=90,
     LeftShift=160, RightShift=161, LeftControl=162, RightControl=163, LeftAlt=164, RightAlt=165,
@@ -1125,7 +1557,7 @@ public static class Input
     private static HashSet<int> _previousKeys = new();
     private static int _mouseButtons;
     private static int _previousMouseButtons;
-    private static float _mouseX, _mouseY;
+    private static float _mouseX, _mouseY, _mouseScroll;
     private static Vector3 _mousePosition;
     private static readonly Dictionary<string, float> _smoothed = new(StringComparer.OrdinalIgnoreCase);
     public static bool anyKey => _keys.Count > 0;
@@ -1134,10 +1566,16 @@ public static class Input
     public static Vector3 mousePosition => _mousePosition;
     /// <summary>Mouse movement in the current frame, in pixels.</summary>
     public static Vector2 mouseDelta => new(_mouseX, _mouseY);
+    /// <summary>Mouse wheel movement this frame in notches (y &gt; 0 = scrolled away from the user).</summary>
+    public static Vector2 mouseScrollDelta => new(0f, _mouseScroll);
 
     public static void BeginFrame(IEnumerable<int> keys, int mouseButtons, float mouseX, float mouseY,
         float mousePositionX, float mousePositionY)
+        => BeginFrame(keys, mouseButtons, mouseX, mouseY, mousePositionX, mousePositionY, 0f);
+    public static void BeginFrame(IEnumerable<int> keys, int mouseButtons, float mouseX, float mouseY,
+        float mousePositionX, float mousePositionY, float mouseScroll)
     {
+        _mouseScroll = mouseScroll;
         if (!InputMap.isLoaded) InputMap.Load();
         _previousKeys = _keys;
         _keys = keys.ToHashSet();
@@ -1201,6 +1639,7 @@ public static class Input
                 {
                     InputMap.AxisSource.MouseDeltaX => _mouseX,
                     InputMap.AxisSource.MouseDeltaY => _mouseY,
+                    InputMap.AxisSource.MouseScroll => _mouseScroll,
                     InputMap.AxisSource.MousePositionX => _mousePosition.x,
                     InputMap.AxisSource.MousePositionY => _mousePosition.y,
                     _ => 0f
@@ -1212,7 +1651,7 @@ public static class Input
         if (string.Equals(axisName, "Vertical", StringComparison.OrdinalIgnoreCase)) return (GetKey(KeyCode.W) ? 1 : 0) - (GetKey(KeyCode.S) ? 1 : 0);
         if (string.Equals(axisName, "Mouse X", StringComparison.OrdinalIgnoreCase)) return _mouseX;
         if (string.Equals(axisName, "Mouse Y", StringComparison.OrdinalIgnoreCase)) return _mouseY;
-        if (string.Equals(axisName, "Mouse ScrollWheel", StringComparison.OrdinalIgnoreCase)) return 0;
+        if (string.Equals(axisName, "Mouse ScrollWheel", StringComparison.OrdinalIgnoreCase)) return _mouseScroll;
         return 0;
     }
 }
@@ -1220,24 +1659,38 @@ public static class Input
 public static class Time
 {
     private static float _rawDelta;
+    private static float _scaledDelta;
+    private static float _fixedDeltaTime = 0.02f;
     public static float timeScale { get; set; } = 1f;
     public static float deltaTime { get; private set; }
     public static float unscaledDeltaTime => _rawDelta;
     public static float smoothDeltaTime => deltaTime;
-    public static float fixedDeltaTime => 0.02f;
+    /// <summary>Interval of FixedUpdate/physics in scaled seconds. Inside FixedUpdate, deltaTime equals this value.</summary>
+    public static float fixedDeltaTime { get => _fixedDeltaTime; set => _fixedDeltaTime = Math.Clamp(value, 0.001f, 0.5f); }
+    public static float fixedUnscaledDeltaTime => timeScale > 0f ? _fixedDeltaTime / timeScale : _fixedDeltaTime;
+    public static bool inFixedTimeStep { get; private set; }
     public static float time { get; private set; }
+    public static float fixedTime { get; private set; }
     public static float realtimeSinceStartup { get; private set; }
     public static float unscaledTime => realtimeSinceStartup;
     public static int frameCount { get; private set; }
     public static void BeginFrame(float delta)
     {
         _rawDelta = MathF.Max(0, delta);
-        deltaTime = _rawDelta * MathF.Max(0, timeScale);
+        _scaledDelta = _rawDelta * MathF.Max(0, timeScale);
+        deltaTime = _scaledDelta;
         realtimeSinceStartup += _rawDelta;
-        time += deltaTime;
+        time += _scaledDelta;
         frameCount++;
     }
     public static void SetDeltaTimeFromHost(float delta) => deltaTime = MathF.Max(0, delta) * MathF.Max(0, timeScale);
+    internal static void BeginFixedStep() { inFixedTimeStep = true; deltaTime = _fixedDeltaTime; }
+    internal static void EndFixedStep() { inFixedTimeStep = false; fixedTime += _fixedDeltaTime; deltaTime = _scaledDelta; }
+    internal static void Reset()
+    {
+        _rawDelta = _scaledDelta = 0f; _fixedDeltaTime = 0.02f; timeScale = 1f; deltaTime = 0f;
+        inFixedTimeStep = false; time = fixedTime = realtimeSinceStartup = 0f; frameCount = 0;
+    }
 }
 
 public static class Debug
@@ -1254,6 +1707,40 @@ public static class Mathf
     public const float PI = MathF.PI;
     public const float Deg2Rad = MathF.PI / 180f;
     public const float Rad2Deg = 180f / MathF.PI;
+    public const float Infinity = float.PositiveInfinity;
+    public const float NegativeInfinity = float.NegativeInfinity;
+    public const float Epsilon = float.Epsilon;
+    public static float LerpUnclamped(float a, float b, float t) => a + (b - a) * t;
+    public static float Log(float value, float newBase) => MathF.Log(value) / MathF.Log(newBase);
+    public static float Log10(float value) => MathF.Log10(value);
+    public static float MoveTowardsAngle(float current, float target, float maxDelta)
+    {
+        float delta = DeltaAngle(current, target);
+        return -maxDelta < delta && delta < maxDelta ? target : MoveTowards(current, current + delta, maxDelta);
+    }
+    /// <summary>Critically damped spring towards target (same algorithm as Unity's Mathf.SmoothDamp).</summary>
+    public static float SmoothDamp(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed = float.PositiveInfinity, float deltaTime = -1f)
+    {
+        if (deltaTime < 0f) deltaTime = Time.deltaTime;
+        smoothTime = MathF.Max(0.0001f, smoothTime);
+        float omega = 2f / smoothTime;
+        float x = omega * deltaTime;
+        float exp = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
+        float change = current - target;
+        float originalTo = target;
+        float maxChange = maxSpeed * smoothTime;
+        change = Clamp(change, -maxChange, maxChange);
+        target = current - change;
+        float temp = (currentVelocity + omega * change) * deltaTime;
+        currentVelocity = (currentVelocity - omega * temp) * exp;
+        float output = target + (change + temp) * exp;
+        if (originalTo - current > 0f == output > originalTo) { output = originalTo; currentVelocity = deltaTime > 0f ? (output - originalTo) / deltaTime : 0f; }
+        return output;
+    }
+    public static float SmoothDampAngle(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed = float.PositiveInfinity, float deltaTime = -1f)
+        => SmoothDamp(current, current + DeltaAngle(current, target), ref currentVelocity, smoothTime, maxSpeed, deltaTime);
+    public static bool IsPowerOfTwo(int value) => value > 0 && (value & (value - 1)) == 0;
+    public static int NextPowerOfTwo(int value) { if (value <= 1) return 1; int p = 1; while (p < value && p < (1 << 30)) p <<= 1; return p; }
     public static float Abs(float value) => MathF.Abs(value);
     public static float Sin(float value) => MathF.Sin(value);
     public static float Cos(float value) => MathF.Cos(value);
@@ -1307,7 +1794,9 @@ public static class Mathf
 /// <summary>Deterministic API surface for script-friendly random values.</summary>
 public static class Random
 {
-    private static readonly System.Random Generator = new();
+    private static System.Random Generator = new();
+    /// <summary>Re-seeds the generator so the following values are reproducible.</summary>
+    public static void InitState(int seed) => Generator = new System.Random(seed);
     public static int Range(int minInclusive, int maxExclusive) => maxExclusive <= minInclusive ? minInclusive : Generator.Next(minInclusive, maxExclusive);
     public static float Range(float minInclusive, float maxInclusive) => minInclusive + (float)Generator.NextDouble() * (maxInclusive-minInclusive);
     public static float value => (float)Generator.NextDouble();
@@ -1319,6 +1808,23 @@ public static class Random
             return Vector3.zero;
         }
     }
+    public static Vector2 insideUnitCircle
+    {
+        get
+        {
+            float angle = Range(0f, MathF.PI * 2f), radius = MathF.Sqrt(value);
+            return new Vector2(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius);
+        }
+    }
+    public static Vector3 onUnitSphere
+    {
+        get
+        {
+            float z = Range(-1f, 1f), angle = Range(0f, MathF.PI * 2f), r = MathF.Sqrt(1f - z * z);
+            return new Vector3(r * MathF.Cos(angle), r * MathF.Sin(angle), z);
+        }
+    }
+    public static Quaternion rotation => Quaternion.Euler(Range(0f, 360f), Range(0f, 360f), Range(0f, 360f));
 }
 
 /// <summary>Persistent key/value storage saved next to the running scripts (ForgePlayerPrefs.txt in the working directory).</summary>
@@ -1405,22 +1911,32 @@ public static class Application
     }
 }
 
-/// <summary>Screen dimensions stub. The native host reports actual viewport size via protocol.</summary>
+/// <summary>Size of the game viewport in pixels, reported by the native engine every frame.</summary>
 public static class Screen
 {
     public static int width { get; internal set; } = 1920;
     public static int height { get; internal set; } = 1080;
+    internal static void SetSize(int newWidth, int newHeight)
+    {
+        if (newWidth > 0) width = newWidth;
+        if (newHeight > 0) height = newHeight;
+    }
     public static float dpi => 96f;
     public static bool fullScreen { get; set; }
 }
 
-/// <summary>Minimal coroutine support. StartCoroutine runs an IEnumerator alongside Update each frame.</summary>
+/// <summary>Handle returned by StartCoroutine. The host resumes coroutines after Update and before LateUpdate.</summary>
 public class Coroutine
 {
     internal readonly System.Collections.IEnumerator Enumerator;
     internal bool Running = true;
     internal float WaitForSecondsRemaining = -1f;
+    internal float WaitRealtimeRemaining = -1f;
+    internal Func<bool>? WaitCondition;
+    internal int StartedFrame = -1;
     internal Coroutine(System.Collections.IEnumerator enumerator) { Enumerator = enumerator; }
+    internal void Stop() { Running = false; WaitCondition = null; }
+    public bool isRunning => Running;
 }
 
 /// <summary>Yield instruction: wait for a number of seconds before resuming the coroutine.</summary>
@@ -1432,3 +1948,35 @@ public class WaitForSeconds
 
 /// <summary>Yield instruction: resume at the end of the current frame.</summary>
 public sealed class WaitForEndOfFrame { }
+
+/// <summary>Yield instruction: resume after the next physics step (resumes on the next frame).</summary>
+public sealed class WaitForFixedUpdate { }
+
+/// <summary>Yield instruction: wait using unscaled time (ignores Time.timeScale).</summary>
+public sealed class WaitForSecondsRealtime
+{
+    public readonly float Seconds;
+    public WaitForSecondsRealtime(float seconds) { Seconds = seconds; }
+}
+
+/// <summary>Base class for custom yield instructions: the coroutine waits while keepWaiting is true.</summary>
+public abstract class CustomYieldInstruction
+{
+    public abstract bool keepWaiting { get; }
+}
+
+/// <summary>Yield instruction: wait until the predicate returns true.</summary>
+public sealed class WaitUntil : CustomYieldInstruction
+{
+    private readonly Func<bool> _predicate;
+    public WaitUntil(Func<bool> predicate) { _predicate = predicate; }
+    public override bool keepWaiting => !_predicate();
+}
+
+/// <summary>Yield instruction: wait while the predicate returns true.</summary>
+public sealed class WaitWhile : CustomYieldInstruction
+{
+    private readonly Func<bool> _predicate;
+    public WaitWhile(Func<bool> predicate) { _predicate = predicate; }
+    public override bool keepWaiting => _predicate();
+}

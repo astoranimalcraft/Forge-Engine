@@ -140,6 +140,8 @@ private:
         bool isTerrain = false;
         bool isCamera = false;
         int parentIndex = -1; // Editor hierarchy relation; -1 means a root object.
+        bool activeSelf = true; // GameObject.SetActive; inactive objects and their children are skipped by the renderer.
+        int scriptObjectId = -1; // Stable C# runtime id for the current Play session (vector indices shift on Destroy).
         std::string tag = "Untagged";
         int layer = 0;
         // World matrix is now composed from the parent chain, so children follow
@@ -216,7 +218,8 @@ private:
     int IndexOfObject(const GameObject* object) const;
     XMFLOAT4X4 GetAncestorWorld(const GameObject& object) const;
     int CloneObjectForScript(const GameObject& source, const std::string& newName);
-    bool DestroyObjectForScript(int id);
+    bool DestroyObjectForScript(int index);
+    bool IsActiveInHierarchy(const GameObject& object) const;
     void LoadGameConfig();
     void ApplyGameIcon();
     void DrawGizmo(UINT frameIndex);
@@ -345,6 +348,10 @@ private:
     DirectX::XMFLOAT4X4 m_viewProjection{};
     DirectX::XMFLOAT4X4 m_inverseViewProjection{};
     int m_selectedObject = -1;
+    std::vector<GameObject> m_playSceneSnapshot; // full scene copy restored when Play mode stops
+    bool m_hasPlaySceneSnapshot = false;
+    int m_playSelectedObject = -1;
+    int m_playViewportCameraObjectIndex = -1;
     bool m_standalonePlayer = false; // forge_game.ini next to the exe switches the engine into game mode
     bool m_editorOverlayEnabled = true; // grid, axes and gizmo; Ctrl+G toggles, always off in player mode
     bool m_transformCascadeActive = false; // guards against recursion while refreshing child transforms

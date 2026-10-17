@@ -12,11 +12,10 @@ Este documento separa recursos presentes de funcionalidades que ainda não devem
 
 ## API e scripting
 
-- A API C# sincroniza Transform, nome, estado do MeshRenderer e propriedades básicas das luzes.
-- Não existe hierarquia de Transform pai/filho nem sistema completo de entidades/componentes como Unity.
-- `Transform.localPosition` atualmente é alias de `position`; `lossyScale` é alias de `localScale`.
-- `Transform.Rotate` soma ângulos Euler; não é uma implementação completa de rotação por quaternion.
-- `Input.GetAxis("Mouse ScrollWheel")` retorna zero.
+- A API C# sincroniza Transform (incluindo pai/filho), nome, `SetActive`, estado do MeshRenderer, propriedades básicas das luzes e parâmetros da câmera (v0.6.0).
+- Não existe um sistema completo de entidades/componentes como Unity; componentes adicionados só pelo script vivem no processo de scripts.
+- `lossyScale` é o produto das escalas da cadeia de pais (aproximação sem shear, como na Unity).
+- Scripts do objeto original começam no clone de `Instantiate` apenas no frame seguinte.
 - A API não serializa campos públicos de scripts para o Inspector; parâmetros devem ser editados no código.
 - O protocolo não sincroniza todos os componentes nativos ou todos os recursos do renderer.
 - O processo host separado não é sandbox de segurança.
