@@ -1,6 +1,6 @@
-# Meu Projeto DX12Forge
+# Meu Projeto ForgeEngine
 
-Projeto criado pelo editor **DX12 Forge Engine**. Esta pasta é autocontida: abra-a no editor
+Projeto criado pelo editor **Forge Engine**. Esta pasta é autocontida: abra-a no editor
 pela tela inicial (Open Project) e ela manterá cena, scripts, configurações e presets aqui dentro.
 
 ## Estrutura de pastas

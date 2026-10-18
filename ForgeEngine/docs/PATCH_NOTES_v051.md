@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.1 — viewport, sky, camera and terrain fixes
+# Forge Engine v0.5.1 — viewport, sky, camera and terrain fixes
 
 ## Changes
 

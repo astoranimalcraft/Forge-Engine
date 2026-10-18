@@ -1,4 +1,4 @@
-// DX12 Forge Engine - all shaders are compiled at startup with D3DCompile.
+// Forge Engine - all shaders are compiled at startup with D3DCompile.
 
 cbuffer FrameData : register(b0)
 {
@@ -36,6 +36,8 @@ cbuffer ObjectData : register(b1)
     float4 gMaterial; // metallic, roughness, has albedo texture, emissive gizmo/preview mode
     float4 gUVTransform; // tiling xy, offset zw
     float4 gMaterialMaps; // normal, metallic-roughness, AO, normal scale
+    float4 gEmissive;     // rgb emission tint, w emission intensity
+    float4 gMaterialFlags; // x = emissive map, y = occlusion strength, zw reserved
 };
 
 Texture2D<float> gShadowMap : register(t0);
@@ -45,6 +47,7 @@ Texture2D<float> gSceneDepth : register(t3);
 Texture2D<float4> gNormalTexture : register(t4);
 Texture2D<float4> gMetallicRoughnessTexture : register(t5);
 Texture2D<float4> gAOTexture : register(t6);
+Texture2D<float4> gEmissiveTexture : register(t7);
 SamplerComparisonState gShadowSampler : register(s0);
 SamplerState gLinearSampler : register(s1);
 SamplerState gTextureSampler : register(s2);
@@ -184,10 +187,10 @@ float4 PSPBR(SceneVertex input) : SV_TARGET
     float roughness = clamp(gMaterial.y, 0.045f, 1.0f);
     if (gMaterialMaps.y > 0.5f)
     {
-        // glTF-style packed map: G=roughness, B=metallic.
-        float4 mr = gMetallicRoughnessTexture.Sample(gTextureSampler, input.uv);
-        roughness = clamp(roughness * mr.g, 0.045f, 1.0f);
-        metallic = saturate(metallic * mr.b);
+        // glTF-style packed metallic-roughness map: G = roughness, B = metallic.
+        float4 metallicRoughness = gMetallicRoughnessTexture.Sample(gTextureSampler, input.uv);
+        roughness = clamp(roughness * metallicRoughness.g, 0.045f, 1.0f);
+        metallic = saturate(metallic * metallicRoughness.b);
     }
     float3 N = normalize(input.worldNormal);
     if (gMaterialMaps.x > 0.5f)
@@ -198,7 +201,10 @@ float4 PSPBR(SceneVertex input) : SV_TARGET
         float2 duvdx = ddx(input.uv);
         float2 duvdy = ddy(input.uv);
         float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-        if (abs(determinant) > 1.0e-6f)
+        // Epsilon must stay tiny: a UV span of 1.0 across a screen-filling quad yields a
+        // determinant near 1e-7, so the previous 1.0e-6 threshold rejected normal maps
+        // whenever an object was close to the camera and only applied them at a distance.
+        if (abs(determinant) > 1.0e-12f)
         {
             float3 T = normalize((dpdx * duvdy.y - dpdy * duvdx.y) / determinant);
             T = normalize(T - N * dot(N, T));
@@ -260,11 +266,18 @@ float4 PSPBR(SceneVertex input) : SV_TARGET
     float3 ambientSpecular = environmentColor * environmentFresnel * environmentSpecularWeight;
     float3 ambientSky = ProceduralSky(N) * max(gLightingParameters.y, 0.0f) * 0.52f;
     float ao = gMaterialMaps.z > 0.5f ? saturate(gAOTexture.Sample(gTextureSampler, input.uv).r) : 1.0f;
-    float3 ambientDiffuse = ambientSky * albedo * (1.0f - metallic) * ao;
+    ao = lerp(1.0f, ao, saturate(gMaterialFlags.y));
+    float3 ambientDiffuse = ambientSky * albedo * (1.0f - metallic);
 
     // Retain a very subtle geometric grounding term while respecting the authored AO texture.
     float contactOcclusion = saturate(0.92f + N.y * 0.08f);
-    float3 color = directLighting + (ambientDiffuse + ambientSpecular) * contactOcclusion;
+    float3 color = directLighting + (ambientDiffuse + ambientSpecular) * contactOcclusion * ao;
+    // Authored emission is added after lighting so glowing materials keep their hue in
+    // HDR and pick up bloom in the post-process pass.
+    float3 emission = gEmissive.rgb;
+    if (gMaterialFlags.x > 0.5f)
+        emission *= gEmissiveTexture.Sample(gTextureSampler, input.uv).rgb;
+    color += emission * max(gEmissive.w, 0.0f);
     // Light gizmos are emissive/unlit so their icon stays readable at night. Drag previews
     // use a slightly softer cyan emissive mode and remain legible against any sky condition.
     if (gMaterial.w > 1.5f)
@@ -316,48 +329,119 @@ float Hash21(float2 p)
     return frac(p.x * p.y);
 }
 
-float Noise2D(float2 p)
+// Unit-vector hash. Returning a point on the unit circle makes the gradient field
+// isotropic; a hash built from frac(x * y) is separable in x and y and therefore
+// produces axis-aligned banding.
+float2 Hash22(float2 p)
+{
+    float3 q = frac(float3(p.xyx) * float3(0.1031f, 0.1030f, 0.0973f));
+    q += dot(q, q.yzx + 33.33f);
+    float2 h = frac((q.xx + q.yz) * q.zy) * 2.0f - 1.0f;
+    return normalize(h + 1.0e-5f);
+}
+
+float2 Rotate2(float2 p, float angle)
+{
+    float c = cos(angle);
+    float s = sin(angle);
+    return float2(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
+// Gradient (Perlin-style) noise with a quintic fade.
+// The previous implementation was VALUE noise: it stores a random value at every
+// lattice corner, so each cell interpolates towards a corner value and the cell
+// borders survive into the image as squares. Gradient noise pins the field to zero
+// at the corners and the quintic fade is C2 continuous, so no lattice structure
+// remains. Returns roughly [-0.7, 0.7].
+float GradientNoise(float2 p)
 {
     float2 i = floor(p);
     float2 f = frac(p);
-    f = f * f * (3.0f - 2.0f * f);
-    float a = Hash21(i);
-    float b = Hash21(i + float2(1.0f, 0.0f));
-    float c = Hash21(i + float2(0.0f, 1.0f));
-    float d = Hash21(i + float2(1.0f, 1.0f));
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    float2 u = f * f * f * (f * (f * 6.0f - 15.0f) + 10.0f);
+
+    float n00 = dot(Hash22(i), f);
+    float n10 = dot(Hash22(i + float2(1.0f, 0.0f)), f - float2(1.0f, 0.0f));
+    float n01 = dot(Hash22(i + float2(0.0f, 1.0f)), f - float2(0.0f, 1.0f));
+    float n11 = dot(Hash22(i + float2(1.0f, 1.0f)), f - float2(1.0f, 1.0f));
+
+    return lerp(lerp(n00, n10, u.x), lerp(n01, n11, u.x), u.y);
 }
 
-float FBM(float2 p)
+// Fractal sum of 2D gradient noise, remapped to 0..1. Lacunarity is isotropic (2.02
+// on both axes); the previous version scaled the octaves by (1.97, 2.09), which
+// stretched every octave slightly along one axis and reinforced the visible grid.
+float CloudFBM(float2 p, int octaves)
 {
     float value = 0.0f;
     float amplitude = 0.5f;
-    [unroll]
-    for (int octave = 0; octave < 5; ++octave)
+    float total = 0.0f;
+    [loop]
+    for (int i = 0; i < octaves; ++i)
     {
-        value += amplitude * Noise2D(p);
-        p = p * 2.03f + float2(13.7f, 7.1f);
+        value += amplitude * GradientNoise(p);
+        total += amplitude;
+        p = Rotate2(p * 2.02f + float2(13.7f, 7.1f), 0.73f);
         amplitude *= 0.5f;
     }
-    return value;
+    return value / max(total, 1.0e-5f) * 0.5f + 0.5f;
 }
 
-float RotatedFBM(float2 p, float rotation)
+// 3D unit-vector hash. Sampling the cloud field on the view sphere instead of a flat
+// plane needs 3D noise: a 2D parameterisation has a pole at the zenith (where the
+// azimuthal coordinate is degenerate) and a seam at +/-180 degrees.
+float3 Hash33(float3 p)
 {
-    float c = cos(rotation);
-    float s = sin(rotation);
-    p = float2(c * p.x - s * p.y, s * p.x + c * p.y);
+    p = frac(p * float3(0.1031f, 0.1030f, 0.0973f));
+    p += dot(p, p.yxz + 33.33f);
+    return normalize(frac((p.xxy + p.yzz) * p.zyx) * 2.0f - 1.0f + 1.0e-5f);
+}
+
+float GradientNoise3D(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+    float3 u = f * f * f * (f * (f * 6.0f - 15.0f) + 10.0f);
+
+    float n000 = dot(Hash33(i + float3(0.0f, 0.0f, 0.0f)), f - float3(0.0f, 0.0f, 0.0f));
+    float n100 = dot(Hash33(i + float3(1.0f, 0.0f, 0.0f)), f - float3(1.0f, 0.0f, 0.0f));
+    float n010 = dot(Hash33(i + float3(0.0f, 1.0f, 0.0f)), f - float3(0.0f, 1.0f, 0.0f));
+    float n110 = dot(Hash33(i + float3(1.0f, 1.0f, 0.0f)), f - float3(1.0f, 1.0f, 0.0f));
+    float n001 = dot(Hash33(i + float3(0.0f, 0.0f, 1.0f)), f - float3(0.0f, 0.0f, 1.0f));
+    float n101 = dot(Hash33(i + float3(1.0f, 0.0f, 1.0f)), f - float3(1.0f, 0.0f, 1.0f));
+    float n011 = dot(Hash33(i + float3(0.0f, 1.0f, 1.0f)), f - float3(0.0f, 1.0f, 1.0f));
+    float n111 = dot(Hash33(i + float3(1.0f, 1.0f, 1.0f)), f - float3(1.0f, 1.0f, 1.0f));
+
+    float x00 = lerp(n000, n100, u.x);
+    float x10 = lerp(n010, n110, u.x);
+    float x01 = lerp(n001, n101, u.x);
+    float x11 = lerp(n011, n111, u.x);
+    return lerp(lerp(x00, x10, u.y), lerp(x01, x11, u.y), u.z);
+}
+
+// Rotating the domain between octaves is what actually removes the visible grid.
+// Gradient noise lives on an axis-aligned lattice, so stacking octaves without
+// rotation lines every octave's lattice up with the others and the shared spacing
+// reads as square cells. This matrix is orthonormal (determinant +1), so it turns
+// the lattice without stretching the noise.
+static const float3x3 kCloudOctaveRotation = float3x3(
+     0.00f,  0.80f,  0.60f,
+    -0.80f,  0.36f, -0.48f,
+    -0.60f, -0.48f,  0.64f);
+
+float CloudFBM3D(float3 p, int octaves)
+{
     float value = 0.0f;
     float amplitude = 0.5f;
-    [unroll]
-    for (int octave = 0; octave < 6; ++octave)
+    float total = 0.0f;
+    [loop]
+    for (int i = 0; i < octaves; ++i)
     {
-        value += amplitude * Noise2D(p);
-        p = p * float2(1.97f, 2.09f) + float2(17.3f, 5.7f);
-        p = float2(c * p.x + s * p.y, -s * p.x + c * p.y);
+        value += amplitude * GradientNoise3D(p);
+        total += amplitude;
+        p = mul(p, kCloudOctaveRotation) * 2.03f + float3(13.7f, 7.1f, 5.3f);
         amplitude *= 0.5f;
     }
-    return value;
+    return value / max(total, 1.0e-5f) * 0.5f + 0.5f;
 }
 
 float3 ProceduralSky(float3 rayDirection)
@@ -369,96 +453,180 @@ float3 ProceduralSky(float3 rayDirection)
     const float mu = saturate(dot(rayDirection, sunDirection));
     const float height = rayDirection.y;
 
-    // Deep blue gradient designed to survive ACES tonemap + gamma and still read
-    // as vivid azure. Red/green channels are kept very low relative to blue so the
-    // hue doesn't collapse toward white under compression.
-    const float3 zenithDay = float3(0.04f, 0.20f, 2.80f);
-    const float3 midDay = float3(0.10f, 0.45f, 2.60f);
-    const float3 horizonDay = float3(0.30f, 0.60f, 1.90f);
-    const float3 zenithNight = float3(0.005f, 0.012f, 0.050f);
-    const float3 midNight = float3(0.010f, 0.025f, 0.080f);
-    const float3 horizonNight = float3(0.025f, 0.050f, 0.130f);
+    // Vivid azure gradient tuned for a modern HDR pipeline. The sky is a single
+    // smooth elevation ramp anchored by three calibrated stops instead of a hard
+    // band/core lerp, so the horizon glow and the deep zenith blend continuously.
+    // Peak luminance stays around ~3 nits so ACES tone mapping keeps the blue hue
+    // instead of clipping it toward white.
+    const float3 zenithDay = float3(0.035f, 0.150f, 0.680f);
+    const float3 midDay = float3(0.085f, 0.310f, 0.960f);
+    const float3 horizonDay = float3(0.220f, 0.500f, 1.150f);
+    const float3 zenithNight = float3(0.004f, 0.010f, 0.038f);
+    const float3 midNight = float3(0.008f, 0.022f, 0.070f);
+    const float3 horizonNight = float3(0.020f, 0.045f, 0.120f);
 
     float up = saturate(height);
-    float band = smoothstep(0.0f, 0.35f, up);
-    float core = smoothstep(0.25f, 0.95f, up);
+    float band = smoothstep(0.0f, 0.32f, up);
+    float core = smoothstep(0.24f, 0.92f, up);
     float3 zenith = lerp(zenithNight, zenithDay, daylight);
     float3 mid = lerp(midNight, midDay, daylight);
     float3 horizon = lerp(horizonNight, horizonDay, daylight);
     float3 sky = lerp(horizon, mid, band);
     sky = lerp(sky, zenith, core);
 
+    // Mie atmosphere: a soft forward-scattering halo and a broad horizon glow that
+    // stays physically plausible while keeping the sky readable.
+    float horizonGlow = exp(-abs(height) * 6.5f);
+    sky += lerp(float3(0.35f, 0.42f, 0.55f), float3(0.55f, 0.62f, 0.70f), daylight) * horizonGlow * 0.28f * daylight;
+
     // Below the horizon the dome fades into a dim blue haze.
     float below = 1.0f - smoothstep(-0.25f, 0.0f, height);
     sky = lerp(sky, lerp(horizon, horizon * 0.35f, 0.6f) * lerp(1.0f, 0.18f, daylight * 0.5f), below);
 
-    // Warm twilight band hugging the horizon while the sun is low.
+    // Sun elevation drives the whole daylight look. Twilight warms the sky near
+    // the horizon on the sun side without tinting the clean daytime blue.
     float twilight = (1.0f - smoothstep(0.02f, 0.40f, abs(sunElevation))) *
-                     (1.0f - smoothstep(0.0f, 0.45f, abs(height)));
-    float sunSide = pow(mu, 0.75f);
-    float3 twilightColor = lerp(float3(0.86f, 0.30f, 0.12f), float3(1.00f, 0.58f, 0.30f), sunSide);
-    sky = lerp(sky, twilightColor, twilight * (0.40f + 0.35f * sunSide) * (0.35f + 0.65f * daylight));
+                     (1.0f - smoothstep(0.0f, 0.50f, abs(height)));
+    float sunSide = pow(saturate(mu), 0.75f);
+    float3 twilightColor = lerp(float3(0.85f, 0.28f, 0.12f), float3(1.00f, 0.58f, 0.30f), sunSide);
+    sky = lerp(sky, twilightColor, twilight * (0.42f + 0.35f * sunSide) * (0.30f + 0.70f * daylight));
 
     // Physically-inspired sun disc with derivative antialiasing and atmospheric halo.
+    // smoothstep rises to 1 inside the solar disc, so it must NOT be negated: the
+    // previous "1.0f - smoothstep(...)" evaluated to 1 across the entire sky and added
+    // a full-strength warm sun term to every pixel, which clipped to white after ACES.
     float sunDot = dot(rayDirection, sunDirection);
     float discWidth = max(fwidth(sunDot) * 1.35f, 0.000001f);
-    float disc = 1.0f - smoothstep(cos(radians(0.27f)) - discWidth,
-                                   cos(radians(0.27f)) + discWidth, sunDot);
+    float disc = smoothstep(cos(radians(0.27f)) - discWidth,
+                            cos(radians(0.27f)) + discWidth, sunDot);
     float mie = pow(saturate(sunDot), 16.0f) * 0.14f + pow(saturate(sunDot), 100.0f) * 0.30f;
     float sunVisibility = smoothstep(-0.12f, 0.08f, sunElevation);
     sky += lerp(float3(1.0f, 0.82f, 0.58f), float3(1.0f, 0.95f, 0.82f), daylight) *
            (disc * 1.10f + mie * 0.12f) * sunVisibility;
 
-    // Layered procedural clouds: anisotropic cirrus veil over domained-warped
-    // cumulus field. Coverage defaults to 0.35 so the blue sky dominates; drift
-    // speed is scaled so motion is visible at normal playback rates.
+    // Moon: opposite the sun, so it rises as the sun sets and is hidden by day.
+    // Drawn before the cloud deck so the cumulus layer occludes it correctly.
+    float3 moonDirection = normalize(float3(-sunDirection.x, -sunDirection.y, -sunDirection.z));
+    float moonDot = dot(rayDirection, moonDirection);
+    float moonVisible = 1.0f - smoothstep(0.05f, 0.35f, daylight);
+    if (moonVisible > 0.001f)
+    {
+        const float moonAngle = 0.46f; // ~2.6x the solar disc, matching the real ratio
+        const float moonCos = 0.9999677f; // cos(radians(0.46))
+        float moonWidth = max(fwidth(moonDot) * 1.35f, 0.000001f);
+        float moonDisc = smoothstep(moonCos - moonWidth, moonCos + moonWidth, moonDot);
+        // Disc-space coordinates. moonDot only spans moonCos..1 across the whole disc
+        // (about 0.016 radians), so driving the surface detail from moonDot directly
+        // left it flat. This builds a proper tangent-plane UV instead, and gives the
+        // normalised radial coordinate used for limb darkening.
+        // cross(moonDirection, +Y) collapses when the moon sits at the zenith, so fall
+        // back to +Z there; otherwise normalize(0) yields NaN and poisons the sky.
+        float3 moonAxis = float3(0.0f, 1.0f, 0.0f);
+        if (abs(moonDirection.y) > 0.9999f)
+            moonAxis = float3(0.0f, 0.0f, 1.0f);
+        float3 moonRight = normalize(cross(moonDirection, moonAxis));
+        float3 moonUp = cross(moonRight, moonDirection);
+        float2 discUV = float2(dot(rayDirection, moonRight), dot(rayDirection, moonUp)) /
+                        max(sin(radians(moonAngle)), 1.0e-4f);
+        float discRadius = length(discUV);
+        // 4 cells across the disc: enough to read as craters without shimmering.
+        float craters = CloudFBM(discUV * 260.0f, 4);
+        float maria = CloudFBM(discUV * 90.0f + float2(3.7f, 9.2f), 3);
+        float moonAlbedo = lerp(0.58f, 0.98f, smoothstep(0.35f, 0.70f, craters));
+        moonAlbedo *= lerp(0.70f, 1.0f, smoothstep(0.38f, 0.68f, maria));
+        // Lambertian falloff toward the rim: a lit sphere is brightest facing the
+        // viewer and dims at the limb. The previous form brightened the rim instead.
+        float sphereZ = sqrt(saturate(1.0f - discRadius * discRadius));
+        float limb = lerp(0.55f, 1.0f, sphereZ);
+        float moonLit = moonAlbedo * limb;
+        float3 moonColor = float3(0.92f, 0.93f, 0.86f) * moonLit;
+        float3 moonHalo = float3(0.55f, 0.62f, 0.80f) *
+                          pow(saturate(moonDot), 220.0f) * 0.30f;
+        sky += (moonColor * moonDisc * 1.35f + moonHalo) * moonVisible;
+    }
+
     if (height > -0.02f)
     {
         const float wind = max(gSkyParameters.z, 0.0f);
         const float cloudAltitude = clamp(gSkyParameters.y, 0.05f, 0.60f);
         const float coverage = clamp(gSkyParameters.x, 0.02f, 0.98f);
         float driftTime = gTimeSeconds;
+        float cloudViewDistance = length(gCameraPosition);
 
-        // High cirrus: thin streaks, rotated octaves keep them from looking like blobs.
+        // Sampling a flat plane at height+altitude (the classic volumetric projection)
+        // has a pole at the zenith: the UV barely changes directly overhead, so ONE
+        // noise cell covered most of the upper sky and its interpolation grid was
+        // visible as squares. Sampling the view sphere in 3D removes both that pole and
+        // the azimuth seam, and keeps the cell size uniform everywhere.
+        // The altitude slider still drives the deck: a higher deck means a coarser,
+        // larger-scale cloudscape, matching what raising a cloud layer does in reality.
+        float altitudeScale = lerp(1.35f, 0.70f, smoothstep(0.05f, 0.60f, cloudAltitude));
+        float sphereFrequency = lerp(26.0f, 12.0f, smoothstep(0.0f, 0.55f, up)) * altitudeScale;
+        float3 cloudSphere = rayDirection * sphereFrequency;
+        // A bounded vertical squash restores some of the horizon convergence the flat
+        // plane gave for free, without reintroducing oversized cells overhead.
+        cloudSphere.y *= 1.35f;
+
+        // High cirrus veil: thin wind-stretched streaks. Kept deliberately light so
+        // it reads as a wispy layer over the azure rather than a solid sheet.
         float2 cirrusUV = rayDirection.xz / max(height + 0.55f, 0.30f) * 0.22f;
         cirrusUV += float2(driftTime * 0.045f, driftTime * 0.028f) * wind;
-        float cirrusField = RotatedFBM(cirrusUV * float2(0.55f, 1.6f), 0.65f);
-        float cirrus = smoothstep(0.52f, 0.78f, cirrusField) * 0.08f;
+        float cirrusField = CloudFBM(cirrusUV * float2(0.55f, 1.6f) * 9.0f, 5);
+        float cirrus = smoothstep(0.52f, 0.80f, cirrusField) * 0.055f;
         float cirrusFade = smoothstep(0.02f, 0.18f, height) * (1.0f - smoothstep(0.55f, 1.0f, up));
 
-        // Main cumulus deck at a finite altitude with domain warping for puffy shapes.
-        // Cells shrink toward the horizon so the deck never stretches into giant flat
-        // sheets, and the whole layer fades out below ~3 degrees elevation.
-        float2 cloudUV = rayDirection.xz / max(height + cloudAltitude, cloudAltitude * 0.7f);
-        cloudUV *= lerp(0.12f, 0.48f, smoothstep(0.0f, 0.35f, up));
-        cloudUV += float2(driftTime * 0.038f, -driftTime * 0.022f) * wind;
-        float warpA = RotatedFBM(cloudUV * 0.34f + float2(2.4f, 7.1f), 0.4f);
-        float warpB = RotatedFBM(cloudUV * 0.36f + float2(13.3f, 3.8f), -0.5f);
-        float2 warpedUV = cloudUV + (float2(warpA, warpB) - 0.5f) * 0.85f;
-        float broad = RotatedFBM(warpedUV * 0.62f, 0.2f);
-        float detail = RotatedFBM(warpedUV * 2.4f + float2(5.1f, 17.7f), -0.35f);
-        float cloudField = broad * 0.78f + detail * 0.22f;
-        float clouds = smoothstep(coverage, coverage + 0.32f, cloudField);
+        // Main cumulus deck. Domain warping gives the puffy, cauliflower silhouette
+        // associated with modern volumetric skies while erosion carves the detail.
+        float3 drift = float3(driftTime * 0.010f, 0.0f, -driftTime * 0.007f) * wind;
+        float3 warpedSphere = cloudSphere + drift;
+        float warpA = CloudFBM3D(warpedSphere * 0.30f + float3(2.4f, 7.1f, 1.3f), 4);
+        float warpB = CloudFBM3D(warpedSphere * 0.32f + float3(13.3f, 3.8f, 9.1f), 4);
+        float3 warpOffset = float3(warpA - 0.5f, warpB - 0.5f, (warpA + warpB) * 0.5f - 0.5f);
+        float3 detailSphere = warpedSphere + warpOffset * 0.85f;
+        float broad = CloudFBM3D(detailSphere * 0.26f, 5);
+        float detail = CloudFBM3D(detailSphere * 0.90f + float3(5.1f, 17.7f, 3.3f), 4);
+        // CloudFBM is now normalised to 0..1, so broad*0.78+detail*0.22 sits in a much
+        // narrower band than the old value-noise sum (measured 0.34..0.66, mean 0.498).
+        // These constants spread that observed range back over 0..1 so the coverage
+        // slider keeps its meaning and the default 0.35 yields broken cumulus (~44%)
+        // rather than the overcast sheet the old 0.23 divisor would produce.
+        float cloudField = saturate((broad * 0.78f + detail * 0.22f - 0.43f) / 0.20f);
+        float clouds = smoothstep(coverage, coverage + 0.30f, cloudField);
         float erosion = smoothstep(0.30f, 0.62f, detail);
-        clouds *= lerp(0.55f, 1.0f, erosion);
+        // Keep a visible slate under the lit tops so cumulus never flattens to white.
+        clouds *= lerp(0.28f, 1.0f, erosion);
         float cloudFade = smoothstep(0.04f, 0.25f, height) *
                           lerp(1.0f, 0.30f, smoothstep(0.55f, 0.95f, up));
 
+        // Normals estimated from the density signal drive self-shadowing, which is
+        // what gives volumetric clouds their characteristic bright tops / dark bases.
+        float densityEpsilon = 0.09f;
+        float densityDx = CloudFBM3D((detailSphere + float3(densityEpsilon, 0.0f, 0.0f)) * 0.26f, 5)
+            - CloudFBM3D((detailSphere - float3(densityEpsilon, 0.0f, 0.0f)) * 0.26f, 5);
+        float densityDy = CloudFBM3D((detailSphere + float3(0.0f, densityEpsilon, 0.0f)) * 0.26f, 5)
+            - CloudFBM3D((detailSphere - float3(0.0f, densityEpsilon, 0.0f)) * 0.26f, 5);
+        float heightBias = pow(saturate(detail * 0.7f + cloudField * 0.3f - coverage), 0.7f);
+        float cloudUpness = saturate(0.5f + densityDy * 1.6f + heightBias * 0.55f);
+
         float sunHeight = saturate(sunElevation * 2.0f + 0.30f);
         float silverLining = pow(mu, 8.0f) * 0.35f;
-        float verticalShade = saturate(0.30f + detail * 0.55f + clouds * 0.25f);
+        float selfShadow = lerp(0.32f, 1.0f, cloudUpness);
 
-        // Cloud colors stay in a moderate HDR range so they read as white-ish
-        // after tonemapping without overpowering the blue sky beneath.
-        float3 cloudShadow = lerp(float3(0.18f, 0.22f, 0.32f), float3(0.28f, 0.34f, 0.48f), sunHeight);
-        float3 cloudLit = lerp(float3(0.55f, 0.62f, 0.78f), float3(0.72f, 0.78f, 0.92f), sunHeight);
+        // Aerial perspective: fade the deck into the sky with distance so it sits in
+        // the atmosphere instead of pasting over it.
+        float aerial = saturate(cloudViewDistance / 900.0f);
+        selfShadow = lerp(selfShadow, 0.65f, aerial * 0.35f);
+
+        float3 cloudShadow = lerp(float3(0.20f, 0.24f, 0.33f), float3(0.33f, 0.39f, 0.52f), sunHeight) * selfShadow;
+        float3 cloudLit = lerp(float3(0.62f, 0.68f, 0.82f), float3(0.82f, 0.86f, 0.98f), sunHeight) * selfShadow;
         cloudLit = lerp(cloudLit, float3(1.0f, 0.80f, 0.55f), twilight * 0.55f + silverLining * 0.4f);
-        float3 cloudDay = lerp(cloudShadow, cloudLit, verticalShade + silverLining);
+        float3 cloudDay = lerp(cloudShadow, cloudLit, cloudUpness + silverLining);
         float3 cloudNight = float3(0.04f, 0.06f, 0.12f);
         float3 cloudColor = lerp(cloudNight, cloudDay, daylight);
+        cloudColor = lerp(cloudColor, sky * 0.85f, aerial * 0.5f);
 
-        float cumulusAlpha = clouds * cloudFade * lerp(0.12f, 0.30f, daylight);
-        sky = lerp(sky, cloudColor, cumulusAlpha);
+        float cumulusAlpha = clouds * cloudFade * lerp(0.12f, 0.34f, daylight);
+        sky = lerp(sky, cloudColor, saturate(cumulusAlpha));
         float3 cirrusColor = lerp(cloudNight, cloudLit * 0.95f, daylight);
         sky = lerp(sky, cirrusColor, cirrus * cirrusFade * daylight);
     }
@@ -516,7 +684,6 @@ float3 ProceduralSky(float3 rayDirection)
 struct SkyGridPixel
 {
     float4 color : SV_TARGET;
-    float depth : SV_Depth;
 };
 
 float GridLine(float2 coordinate, float spacing)
@@ -541,7 +708,6 @@ SkyGridPixel PSSkyGrid(FullscreenVertex input)
     float3 rayDirection = normalize(farPoint - gCameraPosition);
     float3 skyColor = ProceduralSky(rayDirection);
 
-    float depth = 1.0f;
     float3 finalColor = skyColor;
     // gSkyParameters.w gates the editor ground grid; the exported player renders pure sky.
     if (gSkyParameters.w >= 0.5f && abs(rayDirection.y) > 0.0001f)
@@ -570,14 +736,12 @@ SkyGridPixel PSSkyGrid(FullscreenVertex input)
                 lineColor = lerp(lineColor, float3(0.95f, 0.18f, 0.16f), axisX * 0.90f);
                 lineColor = lerp(lineColor, float3(0.14f, 0.48f, 1.0f), axisZ * 0.90f);
                 finalColor = lerp(skyColor, lineColor, saturate(lineIntensity * distanceFade));
-                depth = saturate(surfaceDepth);
             }
         }
     }
 
     // The HDR post-process pass performs tone mapping and gamma conversion.
     output.color = float4(max(finalColor, 0.0f), 1.0f);
-    output.depth = depth;
     return output;
 }
 

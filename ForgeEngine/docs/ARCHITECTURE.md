@@ -5,7 +5,7 @@
 A engine combina um editor Win32/C++17 com renderer DirectX 12 e um runtime de scripts C# hospedado em outro processo .NET 8.
 
 ```text
-DX12ForgeEngine.exe (C++ / Win32 / DirectX 12)
+ForgeEngine.exe (C++ / Win32 / DirectX 12)
   ├─ Engine (device, swap chain, command queues, render targets, camera, scene objects)
   ├─ EditorUI (Dear ImGui docking, Inspector, Hierarchy, Project Files, Console, ImGuizmo)
   └─ ScriptRuntime (process management, build, pipes, frame synchronization)

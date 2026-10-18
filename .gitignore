@@ -1,0 +1,31 @@
+# CMake / MSVC build output
+out/
+build/
+[Dd]ebug/
+[Rr]elease/
+x64/
+*.user
+*.suo
+*.vcxproj.user
+CMakeCache.txt
+CMakeFiles/
+
+# .NET build output (the C# scripting API and script host)
+bin/
+obj/
+*.dll
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+
+# Third-party payloads restored by NuGet, never committed
+packages/
+*.nupkg
+
+# Editor and OS cruft
+.vs/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

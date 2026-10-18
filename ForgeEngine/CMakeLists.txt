@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(DX12ForgeEngine
-    VERSION 0.5.9
-    DESCRIPTION "C++17 DirectX 12 3D engine, C# scripting API and editor"
+project(ForgeEngine
+    VERSION 0.5.11
+    DESCRIPTION "Modern C++17 DirectX 12 3D engine, C# scripting API and editor"
     LANGUAGES C CXX
 )
 
 if(NOT WIN32)
-    message(FATAL_ERROR "DX12ForgeEngine requires Windows, MSVC and the Windows SDK.")
+    message(FATAL_ERROR "ForgeEngine requires Windows, MSVC and the Windows SDK.")
 endif()
 
 # Dear ImGui and ImGuizmo are fetched from their upstream repositories on the
@@ -90,7 +90,7 @@ target_compile_features(ImGuizmo PUBLIC cxx_std_17)
 target_compile_definitions(ImGuizmo PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(ImGuizmo PUBLIC imgui)
 
-add_executable(DX12ForgeEngine WIN32
+add_executable(ForgeEngine WIN32
     src/App/main.cpp
     src/Engine/Engine.cpp
     src/Engine/Engine.h
@@ -103,13 +103,13 @@ add_executable(DX12ForgeEngine WIN32
 
 set_source_files_properties(assets/shaders/Shaders.hlsl PROPERTIES HEADER_FILE_ONLY TRUE)
 
-target_compile_features(DX12ForgeEngine PRIVATE cxx_std_17)
-target_include_directories(DX12ForgeEngine PRIVATE
+target_compile_features(ForgeEngine PRIVATE cxx_std_17)
+target_include_directories(ForgeEngine PRIVATE
     src/Engine
     src/Editor
     src/Scripting
 )
-target_compile_definitions(DX12ForgeEngine PRIVATE
+target_compile_definitions(ForgeEngine PRIVATE
     UNICODE
     _UNICODE
     NOMINMAX
@@ -117,7 +117,7 @@ target_compile_definitions(DX12ForgeEngine PRIVATE
 )
 
 if(MSVC)
-    target_compile_options(DX12ForgeEngine PRIVATE
+    target_compile_options(ForgeEngine PRIVATE
         /W4
         /permissive-
         /Zc:__cplusplus
@@ -126,7 +126,7 @@ if(MSVC)
     )
 endif()
 
-target_link_libraries(DX12ForgeEngine PRIVATE
+target_link_libraries(ForgeEngine PRIVATE
     imgui
     ImGuizmo
     assimp::assimp
@@ -145,14 +145,14 @@ target_link_libraries(DX12ForgeEngine PRIVATE
     advapi32
 )
 
-add_custom_command(TARGET DX12ForgeEngine POST_BUILD
+add_custom_command(TARGET ForgeEngine POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/Shaders.hlsl"
-        "$<TARGET_FILE_DIR:DX12ForgeEngine>/Shaders.hlsl"
+        "$<TARGET_FILE_DIR:ForgeEngine>/Shaders.hlsl"
     COMMENT "Copying runtime HLSL shader"
     VERBATIM
 )
 
-set_property(TARGET DX12ForgeEngine PROPERTY
-    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:DX12ForgeEngine>"
+set_property(TARGET ForgeEngine PROPERTY
+    VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:ForgeEngine>"
 )

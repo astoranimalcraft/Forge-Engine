@@ -145,6 +145,77 @@ internal static class Program
                     data.UseGravity = ParseInt(p,35,1) != 0;
                     data.IsKinematic = ParseInt(p,36,0) != 0;
                 }
+                if (p.Length >= 48)
+                {
+                    data.HasMaterial = true;
+                    data.BaseColor = new Vector3(ParseFloat(p,37,1), ParseFloat(p,38,1), ParseFloat(p,39,1));
+                    data.Metallic = Mathf.Clamp01(ParseFloat(p,40,0));
+                    data.Roughness = Mathf.Clamp(ParseFloat(p,41,0.6f), 0.045f, 1f);
+                    data.EmissiveColor = new Vector3(ParseFloat(p,42,0), ParseFloat(p,43,0), ParseFloat(p,44,0));
+                    data.EmissiveIntensity = MathF.Max(0f, ParseFloat(p,45,0));
+                    data.NormalMapScale = MathF.Max(0f, ParseFloat(p,46,1));
+                    data.DoubleSided = ParseInt(p,47,0) != 0;
+                }
+                if (p.Length >= 61)
+                {
+                    data.CameraFieldOfView = ParseFloat(p,48,60);
+                    data.CameraNearClip = ParseFloat(p,49,0.05f);
+                    data.CameraFarClip = ParseFloat(p,50,1000);
+                    data.CameraOrthographic = ParseInt(p,51,0) != 0;
+                    data.CameraOrthographicSize = ParseFloat(p,52,5);
+                    data.CameraDepth = ParseInt(p,53,0);
+                    data.CameraBackgroundColor = new Vector4(ParseFloat(p,54,0.02f), ParseFloat(p,55,0.03f),
+                        ParseFloat(p,56,0.05f), ParseFloat(p,57,1f));
+                    data.CameraDrawSkybox = ParseInt(p,58,1) != 0;
+                    data.CameraDrawGizmos = ParseInt(p,59,1) != 0;
+                    data.CameraCullingMask = ParseInt(p,60,int.MaxValue);
+                }
+                if (p.Length >= 65)
+                {
+                    data.ColliderCenter = new Vector3(ParseFloat(p,61,0), ParseFloat(p,62,0), ParseFloat(p,63,0));
+                    data.ParentIndex = ParseInt(p,64,-1);
+                }
+                if (p.Length >= 109)
+                {
+                    data.HasCharacterController = ParseInt(p,65,0) != 0;
+                    data.CharacterHeight = ParseFloat(p,66,1.8f);
+                    data.CharacterRadius = ParseFloat(p,67,0.3f);
+                    data.CharacterSlopeLimit = ParseFloat(p,68,45f);
+                    data.CharacterStepOffset = ParseFloat(p,69,0.3f);
+                    data.CharacterSkinWidth = ParseFloat(p,70,0.02f);
+                    data.CharacterGravity = ParseFloat(p,71,-9.81f);
+                    data.CharacterSpeed = ParseFloat(p,72,6f);
+                    data.CharacterJumpHeight = ParseFloat(p,73,1.2f);
+                    data.CharacterVelocity = new Vector3(ParseFloat(p,74,0), ParseFloat(p,75,0), ParseFloat(p,76,0));
+                    data.CharacterIsGrounded = ParseInt(p,77,0) != 0;
+                    data.HasParticleSystem = ParseInt(p,78,0) != 0;
+                    data.ParticleMaxCount = ParseInt(p,79,512);
+                    data.ParticleLifetime = ParseFloat(p,80,2f);
+                    data.ParticleStartSpeed = ParseFloat(p,81,2f);
+                    data.ParticleStartSize = ParseFloat(p,82,0.15f);
+                    data.ParticleGravity = ParseFloat(p,83,-1.5f);
+                    data.ParticleEmissionRate = ParseFloat(p,84,40f);
+                    data.ParticleStartColor = new Vector3(ParseFloat(p,85,1f), ParseFloat(p,86,0.85f), ParseFloat(p,87,0.45f));
+                    data.ParticleDirection = new Vector3(ParseFloat(p,88,0), ParseFloat(p,89,1), ParseFloat(p,90,0));
+                    data.ParticleSpread = ParseFloat(p,91,20f);
+                    data.ParticleLooping = ParseInt(p,92,1) != 0;
+                    data.HasAnimator = ParseInt(p,93,0) != 0;
+                    data.AnimatorClipName = DecodeBase64(p[94]);
+                    data.AnimatorSpeed = ParseFloat(p,95,1f);
+                    data.AnimatorLoop = ParseInt(p,96,1) != 0;
+                    data.AnimatorPlaying = ParseInt(p,97,1) != 0;
+                    data.AnimatorTime = ParseFloat(p,98,0f);
+                    data.HasAudioListener = ParseInt(p,99,0) != 0;
+                    data.AudioListenerVolume = ParseFloat(p,100,1f);
+                    data.AudioSourceVolume = ParseFloat(p,101,1f);
+                    data.AudioSourcePitch = ParseFloat(p,102,1f);
+                    data.AudioSourceMinDistance = ParseFloat(p,103,1f);
+                    data.AudioSourceMaxDistance = ParseFloat(p,104,500f);
+                    data.AudioSourceLoop = ParseInt(p,105,0) != 0;
+                    data.AudioSourcePlayOnAwake = ParseInt(p,106,0) != 0;
+                    data.AudioSourceClipPath = DecodeBase64(p[107]);
+                    data.AudioSourceSpatial = ParseInt(p,108,1) != 0;
+                }
                 incomingObjects.Add(data);
             }
             else if (p[0] == "SCRIPT" && p.Length >= 4)
@@ -196,6 +267,15 @@ internal static class Program
             SafeCall(instance, "LateUpdate", instance.Behaviour.LateUpdate);
         }
 
+        // Simulate built-in components after the scripts, so a script can still drive them in
+        // Update and the simulation sees this frame's intent.
+        foreach (var go in Scene.gameObjects)
+        {
+            if (!go.activeSelf) continue;
+            go.GetComponent<ParticleSystem>()?.Simulate(delta);
+            go.GetComponent<Animator>()?.Simulate(delta);
+        }
+
         foreach (var instance in Instances.Values)
             Emit("SCRIPTSET", instance.ObjectId.ToString(CultureInfo.InvariantCulture), instance.ClassName,
                 instance.Behaviour.enabled ? "1" : "0");
@@ -217,7 +297,41 @@ internal static class Program
                 s.ColliderType.ToString(CultureInfo.InvariantCulture),
                 F(s.ColliderSize.x), F(s.ColliderSize.y), F(s.ColliderSize.z),
                 s.IsTrigger ? "1" : "0", s.HasRigidbody ? "1" : "0", F(s.Mass),
-                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0");
+                s.UseGravity ? "1" : "0", s.IsKinematic ? "1" : "0",
+                F(s.BaseColor.x), F(s.BaseColor.y), F(s.BaseColor.z),
+                F(s.Metallic), F(s.Roughness),
+                F(s.EmissiveColor.x), F(s.EmissiveColor.y), F(s.EmissiveColor.z), F(s.EmissiveIntensity),
+                F(s.NormalMapScale), s.DoubleSided ? "1" : "0",
+                F(s.CameraFieldOfView), F(s.CameraNearClip), F(s.CameraFarClip),
+                s.CameraOrthographic ? "1" : "0", F(s.CameraOrthographicSize),
+                s.CameraDepth.ToString(CultureInfo.InvariantCulture),
+                F(s.CameraBackgroundColor.x), F(s.CameraBackgroundColor.y),
+                F(s.CameraBackgroundColor.z), F(s.CameraBackgroundColor.w),
+                s.CameraDrawSkybox ? "1" : "0", s.CameraDrawGizmos ? "1" : "0",
+                s.CameraCullingMask.ToString(CultureInfo.InvariantCulture),
+                F(s.ColliderCenter.x), F(s.ColliderCenter.y), F(s.ColliderCenter.z),
+                s.ParentIndex.ToString(CultureInfo.InvariantCulture),
+                s.HasCharacterController ? "1" : "0", F(s.CharacterHeight), F(s.CharacterRadius),
+                F(s.CharacterSlopeLimit), F(s.CharacterStepOffset), F(s.CharacterSkinWidth),
+                F(s.CharacterGravity), F(s.CharacterSpeed), F(s.CharacterJumpHeight),
+                F(s.CharacterVelocity.x), F(s.CharacterVelocity.y), F(s.CharacterVelocity.z),
+                s.CharacterIsGrounded ? "1" : "0",
+                s.HasParticleSystem ? "1" : "0", s.ParticleMaxCount.ToString(CultureInfo.InvariantCulture),
+                F(s.ParticleLifetime), F(s.ParticleStartSpeed), F(s.ParticleStartSize),
+                F(s.ParticleGravity), F(s.ParticleEmissionRate),
+                F(s.ParticleStartColor.x), F(s.ParticleStartColor.y), F(s.ParticleStartColor.z),
+                F(s.ParticleDirection.x), F(s.ParticleDirection.y), F(s.ParticleDirection.z),
+                F(s.ParticleSpread), s.ParticleLooping ? "1" : "0",
+                s.HasAnimator ? "1" : "0",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(s.AnimatorClipName)),
+                F(s.AnimatorSpeed), s.AnimatorLoop ? "1" : "0", s.AnimatorPlaying ? "1" : "0",
+                F(s.AnimatorTime),
+                s.HasAudioListener ? "1" : "0", F(s.AudioListenerVolume),
+                F(s.AudioSourceVolume), F(s.AudioSourcePitch), F(s.AudioSourceMinDistance),
+                F(s.AudioSourceMaxDistance), s.AudioSourceLoop ? "1" : "0",
+                s.AudioSourcePlayOnAwake ? "1" : "0",
+                Convert.ToBase64String(Encoding.UTF8.GetBytes(s.AudioSourceClipPath)),
+                s.AudioSourceSpatial ? "1" : "0");
         }
 
         foreach (var command in ForgeRuntimeCommands.Drain())

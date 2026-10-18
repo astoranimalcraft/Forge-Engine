@@ -14,7 +14,7 @@
 
 ## Sistema de pasta do projeto + recentes persistentes
 - Modal "Create Project" tem botão Browse com IFileOpenDialog FOS_PICKFOLDERS moderno.
-- Projetos recentes persistidos em `%APPDATA%\DX12Forge\RecentProjects.ini` — sobrevivem entre sessões.
+- Projetos recentes persistidos em `%APPDATA%\ForgeEngine\RecentProjects.ini` — sobrevivem entre sessões.
 - Lista carregada na inicialização, salva ao abrir/criar projeto, deduplicada, cap 12.
 
 ## Exportação estilo Unity

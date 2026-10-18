@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.8 — Inputs.json, física com eventos, overlay de colideres e correções
+# Forge Engine v0.5.8 — Inputs.json, física com eventos, overlay de colideres e correções
 
 ## 1. `Config/Inputs.json`: todas as teclas, eixos e comandos num só arquivo
 
@@ -47,4 +47,4 @@
 
 ## 8. Versão
 
-- `CMakeLists.txt` 0.5.8, menus/about "v0.5.8"/"Editor 0.5.8", `Application.version => "0.5.8"`, marcadores `DX12Forge.project` gravam EngineVersion 0.5.8.
+- `CMakeLists.txt` 0.5.8, menus/about "v0.5.8"/"Editor 0.5.8", `Application.version => "0.5.8"`, marcadores `ForgeEngine.project` gravam EngineVersion 0.5.8.

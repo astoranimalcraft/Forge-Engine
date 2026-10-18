@@ -153,7 +153,7 @@ namespace
         {
             std::filesystem::path result(appDataPath);
             CoTaskMemFree(appDataPath);
-            return result / L"DX12Forge";
+            return result / L"ForgeEngine";
         }
         return {};
     }
@@ -175,7 +175,7 @@ namespace
         {
             if (line.empty()) continue;
             std::filesystem::path p = std::filesystem::u8path(line);
-            if (std::filesystem::exists(p / L"DX12Forge.project", ec))
+            if (std::filesystem::exists(p / L"ForgeEngine.project", ec))
                 result.push_back(std::move(p));
         }
         if (result.size() > 12) result.resize(12);
@@ -249,12 +249,12 @@ namespace
     };
 }
 
-DX12ForgeEditorUI::~DX12ForgeEditorUI()
+ForgeEditorUI::~ForgeEditorUI()
 {
     Shutdown();
 }
 
-bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
+bool ForgeEditorUI::Initialize(ForgeEngine& engine)
 {
     if (m_contextInitialized)
         return true;
@@ -265,7 +265,18 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
     const std::filesystem::path executableDirectory = executableLength > 0
         ? std::filesystem::path(std::wstring(executableBuffer.data(), executableLength)).parent_path()
         : std::filesystem::current_path();
-    const auto sourceRoot = DetectSourceRoot(executableDirectory);
+    // Exported games ship their data in a <Product>_Data folder next to the
+    // executable (mirroring Unity). The editor walks up to the source tree instead.
+    std::filesystem::path sourceRoot;
+    if (engine.m_standalonePlayer)
+    {
+        sourceRoot = ResolveStandaloneDataRoot(executableDirectory, engine.m_gameProjectFolder);
+        if (sourceRoot.empty()) sourceRoot = DetectSourceRoot(executableDirectory);
+    }
+    else
+    {
+        sourceRoot = DetectSourceRoot(executableDirectory);
+    }
     m_sourceRoot = sourceRoot;
     m_projectRoot = sourceRoot / L"Project";
     m_scriptRuntime = std::make_unique<ForgeScriptRuntime>();
@@ -287,11 +298,11 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
     for (const auto& folder : folders)
         std::filesystem::create_directories(folder, ec);
 
-    const auto projectFile = m_projectRoot / L"DX12Forge.project";
+    const auto projectFile = m_projectRoot / L"ForgeEngine.project";
     if (!std::filesystem::exists(projectFile, ec))
     {
         std::ofstream project(projectFile, std::ios::binary);
-        project << "DX12FORGE_PROJECT 1\nName \"DX12 Forge Project\"\nEngineVersion \"0.5.9\"\nAssetRoot \"Assets\"\n";
+        project << "FORGEENGINE_PROJECT 1\nName \"Forge Engine Project\"\nEngineVersion \"0.5.10\"\nAssetRoot \"Assets\"\n";
     }
 
     IMGUI_CHECKVERSION();
@@ -337,12 +348,12 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
 
     ApplyStyle();
 
-    // Restore persisted recent projects list from %APPDATA%\DX12Forge.
+    // Restore persisted recent projects list from %APPDATA%\ForgeEngine.
     m_recentProjects = LoadRecentProjects();
 
     if (!ImGui_ImplWin32_Init(engine.m_hwnd))
     {
-        OutputDebugStringA("DX12 Forge ERROR: ImGui_ImplWin32_Init failed.\n");
+        OutputDebugStringA("Forge Engine ERROR: ImGui_ImplWin32_Init failed.\n");
         return false;
     }
     m_win32Initialized = true;
@@ -352,7 +363,7 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
     heapDescription.NumDescriptors = static_cast<UINT>(m_srvSlots.size());
     heapDescription.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     heapDescription.NodeMask = 0;
-    DX12ForgeEngine::ThrowIfFailed(engine.m_device->CreateDescriptorHeap(
+    ForgeEngine::ThrowIfFailed(engine.m_device->CreateDescriptorHeap(
         &heapDescription, IID_PPV_ARGS(&m_srvHeap)), "Create Dear ImGui SRV descriptor heap");
     m_srvDescriptorIncrement = engine.m_device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -360,7 +371,7 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
     ImGui_ImplDX12_InitInfo initInfo{};
     initInfo.Device = engine.m_device.Get();
     initInfo.CommandQueue = engine.m_commandQueue.Get();
-    initInfo.NumFramesInFlight = static_cast<int>(DX12ForgeEngine::FrameCount);
+    initInfo.NumFramesInFlight = static_cast<int>(ForgeEngine::FrameCount);
     initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
     initInfo.SrvDescriptorHeap = m_srvHeap.Get();
@@ -369,7 +380,7 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
     initInfo.SrvDescriptorFreeFn = FreeSrvDescriptor;
     if (!ImGui_ImplDX12_Init(&initInfo))
     {
-        OutputDebugStringA("DX12 Forge ERROR: ImGui_ImplDX12_Init failed. Check the DirectX 12 debug output.\n");
+        OutputDebugStringA("Forge Engine ERROR: ImGui_ImplDX12_Init failed. Check the DirectX 12 debug output.\n");
         return false;
     }
     m_dx12Initialized = true;
@@ -399,14 +410,14 @@ bool DX12ForgeEditorUI::Initialize(DX12ForgeEngine& engine)
         Log("Standalone player started. Editor overlay is disabled (Ctrl+G re-enables it for debugging).");
         return true;
     }
-    Log("DX12 Forge Editor inicializado.");
+    Log("Forge Engine Editor inicializado.");
     Log("C# scripting: Project/Scripts/ForgeGameScripts.csproj | Ctrl+S compiles | Run > Play starts scripts.");
     Log("Clique no centro da janela para selecionar; segure RMB no centro para olhar e use WASD + Q/E para mover.");
     Log("Gizmo: selecione um objeto na Hierarchy ou viewport; teclas 1/2/3 = mover/rotacionar/escalar. Arraste os eixos no centro da Scene.");
     return true;
 }
 
-void DX12ForgeEditorUI::Shutdown()
+void ForgeEditorUI::Shutdown()
 {
     if (m_scriptRuntime)
         m_scriptRuntime->Stop();
@@ -430,7 +441,7 @@ void DX12ForgeEditorUI::Shutdown()
     m_srvSlots.fill(false);
 }
 
-void DX12ForgeEditorUI::HandleWin32Message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+void ForgeEditorUI::HandleWin32Message(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_DROPFILES) { HandleDroppedFiles(reinterpret_cast<HDROP>(wParam)); return; }
     if (m_win32Initialized)
@@ -439,17 +450,17 @@ void DX12ForgeEditorUI::HandleWin32Message(HWND hwnd, UINT message, WPARAM wPara
     }
 }
 
-bool DX12ForgeEditorUI::WantsCaptureKeyboard() const
+bool ForgeEditorUI::WantsCaptureKeyboard() const
 {
     return m_contextInitialized && ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureKeyboard;
 }
 
-bool DX12ForgeEditorUI::WantsCaptureMouse() const
+bool ForgeEditorUI::WantsCaptureMouse() const
 {
     return m_contextInitialized && ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().WantCaptureMouse;
 }
 
-void DX12ForgeEditorUI::AllocateSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
+void ForgeEditorUI::AllocateSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
     D3D12_CPU_DESCRIPTOR_HANDLE* outCpu, D3D12_GPU_DESCRIPTOR_HANDLE* outGpu)
 {
     if (!outCpu || !outGpu)
@@ -458,10 +469,10 @@ void DX12ForgeEditorUI::AllocateSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
     outCpu->ptr = 0;
     outGpu->ptr = 0;
 
-    auto* self = info ? static_cast<DX12ForgeEditorUI*>(info->UserData) : nullptr;
+    auto* self = info ? static_cast<ForgeEditorUI*>(info->UserData) : nullptr;
     if (!self || !self->m_srvHeap || self->m_srvDescriptorIncrement == 0)
     {
-        OutputDebugStringA("DX12 Forge: ImGui SRV allocator called before heap initialization.\n");
+        OutputDebugStringA("Forge Engine: ImGui SRV allocator called before heap initialization.\n");
         return;
     }
 
@@ -482,13 +493,13 @@ void DX12ForgeEditorUI::AllocateSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
 
     // Keep this as a diagnostic instead of forcing an unconditional __debugbreak.
     // A 1024-entry heap should be ample for the editor UI and its dynamic font atlas.
-    OutputDebugStringA("DX12 Forge ERROR: ImGui SRV descriptor heap exhausted (1024 entries).\n");
+    OutputDebugStringA("Forge Engine ERROR: ImGui SRV descriptor heap exhausted (1024 entries).\n");
 }
 
-void DX12ForgeEditorUI::FreeSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
+void ForgeEditorUI::FreeSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
     D3D12_CPU_DESCRIPTOR_HANDLE cpu, D3D12_GPU_DESCRIPTOR_HANDLE)
 {
-    auto* self = info ? static_cast<DX12ForgeEditorUI*>(info->UserData) : nullptr;
+    auto* self = info ? static_cast<ForgeEditorUI*>(info->UserData) : nullptr;
     if (!self || !self->m_srvHeap || self->m_srvDescriptorIncrement == 0 || cpu.ptr == 0)
         return;
     const D3D12_CPU_DESCRIPTOR_HANDLE base = self->m_srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -499,7 +510,7 @@ void DX12ForgeEditorUI::FreeSrvDescriptor(ImGui_ImplDX12_InitInfo* info,
     if (index < self->m_srvSlots.size()) self->m_srvSlots[index] = false;
 }
 
-void DX12ForgeEditorUI::ApplyStyle()
+void ForgeEditorUI::ApplyStyle()
 {
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 9.0f;
@@ -559,6 +570,11 @@ void DX12ForgeEditorUI::ApplyStyle()
     c[ImGuiCol_TabHovered] = ImVec4(0.21f, 0.26f, 0.39f, 1.00f);
     c[ImGuiCol_TabSelected] = ImVec4(0.13f, 0.16f, 0.23f, 1.00f);
     c[ImGuiCol_TabSelectedOverline] = Accent();
+    c[ImGuiCol_TabDimmed] = ImVec4(0.06f, 0.073f, 0.10f, 1.00f);
+    c[ImGuiCol_TabDimmedSelected] = ImVec4(0.10f, 0.12f, 0.17f, 1.00f);
+    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.28f, 0.34f, 0.55f, 0.60f);
+    c[ImGuiCol_TextLink] = ImVec4(0.45f, 0.62f, 1.00f, 1.00f);
+    c[ImGuiCol_InputTextCursor] = ImVec4(0.72f, 0.80f, 1.00f, 1.00f);
     c[ImGuiCol_DockingPreview] = ImVec4(0.39f, 0.46f, 0.98f, 0.55f);
     c[ImGuiCol_DockingEmptyBg] = ImVec4(0.04f, 0.05f, 0.07f, 1.00f);
     c[ImGuiCol_PlotLines] = ImVec4(0.43f, 0.55f, 0.96f, 1.00f);
@@ -576,7 +592,7 @@ void DX12ForgeEditorUI::ApplyStyle()
     c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.01f, 0.015f, 0.025f, 0.65f);
 }
 
-std::filesystem::path DX12ForgeEditorUI::DetectSourceRoot(const std::filesystem::path& executableDirectory) const
+std::filesystem::path ForgeEditorUI::DetectSourceRoot(const std::filesystem::path& executableDirectory) const
 {
     std::filesystem::path current = executableDirectory;
     std::error_code ec;
@@ -592,7 +608,28 @@ std::filesystem::path DX12ForgeEditorUI::DetectSourceRoot(const std::filesystem:
     return executableDirectory;
 }
 
-void DX12ForgeEditorUI::BeginFrame()
+std::filesystem::path ForgeEditorUI::ResolveStandaloneDataRoot(const std::filesystem::path& executableDirectory,
+    const std::wstring& dataFolder) const
+{
+    std::error_code ec;
+    // Prefer the folder named in forge_game.ini, then fall back to the first *_Data folder
+    // next to the executable (the layout produced by ExportGame).
+    if (!dataFolder.empty())
+    {
+        const auto named = executableDirectory / dataFolder;
+        if (std::filesystem::exists(named / L"Project", ec)) return named;
+    }
+    for (std::filesystem::directory_iterator it(executableDirectory, ec), end; !ec && it != end; it.increment(ec))
+    {
+        std::error_code kindEc;
+        if (!it->is_directory(kindEc)) continue;
+        if (it->path().extension() != L"_Data") continue;
+        if (std::filesystem::exists(it->path() / L"Project", ec)) return it->path();
+    }
+    return {};
+}
+
+void ForgeEditorUI::BeginFrame()
 {
     if (!m_dx12Initialized || !m_win32Initialized) return;
     ImGui_ImplDX12_NewFrame();
@@ -601,7 +638,7 @@ void DX12ForgeEditorUI::BeginFrame()
     ImGuizmo::BeginFrame();
 }
 
-void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
+void ForgeEditorUI::Draw(ForgeEngine& engine)
 {
     if (!m_contextInitialized) return;
 
@@ -666,13 +703,13 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_MenuBar |
         ImGuiWindowFlags_NoBackground;
-    ImGui::Begin("##DX12ForgeDockHost", nullptr, hostFlags);
+    ImGui::Begin("##ForgeEngineDockHost", nullptr, hostFlags);
     ImGui::PopStyleVar(3);
 
     DrawWindowChrome(engine);
     DrawMainMenu(engine);
 
-    const ImGuiID dockspaceId = ImGui::GetID("DX12ForgeDockspace");
+    const ImGuiID dockspaceId = ImGui::GetID("ForgeEngineDockspace");
     m_dockspaceId = dockspaceId;
     const ImVec2 dockspaceSize = ImGui::GetContentRegionAvail();
     EnsureDefaultDockLayout(dockspaceId, dockspaceSize);
@@ -731,9 +768,9 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
             // Constant clip-space size keeps the handles grabbable at any zoom level.
             ImGuizmo::SetGizmoSizeClipSpace(0.14f);
             ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
-            if (engine.m_gizmoMode == DX12ForgeEngine::TransformMode::Rotate)
+            if (engine.m_gizmoMode == ForgeEngine::TransformMode::Rotate)
                 operation = ImGuizmo::ROTATE;
-            else if (engine.m_gizmoMode == DX12ForgeEngine::TransformMode::Scale)
+            else if (engine.m_gizmoMode == ForgeEngine::TransformMode::Scale)
                 operation = ImGuizmo::SCALE;
 
             // Hold Ctrl for Unity-style snapping while dragging.
@@ -772,7 +809,7 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
                     const XMVECTOR translation = XMVector4Transform(XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f), localMatrix);
                     XMStoreFloat3(&object.position, translation);
                 }
-                if (object.lightType == DX12ForgeEngine::LightType::Directional)
+                if (object.lightType == ForgeEngine::LightType::Directional)
                 {
                     engine.m_timeOfDayDrivesSun = false;
                     engine.m_directionalObjectTransformDrivesSun = true;
@@ -1173,7 +1210,7 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
                 engine.m_objects[static_cast<size_t>(m_dragPreviewTextureTarget)].albedoTexturePath =
                     m_dragPreviewPreviousTexture;
             }
-            DX12ForgeEngine::Mesh* importedPreviewMesh = nullptr;
+            ForgeEngine::Mesh* importedPreviewMesh = nullptr;
             if (m_dragPreviewOwnsImportedMesh && m_dragPreviewObjectIndex >= 0 &&
                 m_dragPreviewObjectIndex < static_cast<int>(engine.m_objects.size()))
             {
@@ -1416,7 +1453,7 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
             engine.m_objects[static_cast<size_t>(m_dragPreviewTextureTarget)].albedoTexturePath =
                 m_dragPreviewPreviousTexture;
         }
-        DX12ForgeEngine::Mesh* importedPreviewMesh = nullptr;
+        ForgeEngine::Mesh* importedPreviewMesh = nullptr;
         if (m_dragPreviewOwnsImportedMesh && m_dragPreviewObjectIndex >= 0 &&
             m_dragPreviewObjectIndex < static_cast<int>(engine.m_objects.size()))
         {
@@ -1493,7 +1530,7 @@ void DX12ForgeEditorUI::Draw(DX12ForgeEngine& engine)
     ImGui::Render();
 }
 
-void DX12ForgeEditorUI::DrawWindowChrome(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawWindowChrome(ForgeEngine& engine)
 {
     const float height = 30.0f;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -1556,7 +1593,7 @@ void DX12ForgeEditorUI::DrawWindowChrome(DX12ForgeEngine& engine)
     ImGui::PopStyleVar();
 }
 
-void DX12ForgeEditorUI::DrawMainMenu(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawMainMenu(ForgeEngine& engine)
 {
     if (ImGui::BeginMenuBar())
     {
@@ -1646,7 +1683,7 @@ void DX12ForgeEditorUI::DrawMainMenu(DX12ForgeEngine& engine)
     if (ImGui::BeginMenu("Help"))
     {
         if (ImGui::MenuItem(ICON_COMMAND "  Keyboard Shortcuts")) m_showShortcuts = true;
-        if (ImGui::MenuItem(ICON_HELP "  About DX12 Forge")) m_showAbout = true;
+        if (ImGui::MenuItem(ICON_HELP "  About Forge Engine")) m_showAbout = true;
         ImGui::EndMenu();
     }
 
@@ -1662,14 +1699,14 @@ void DX12ForgeEditorUI::DrawMainMenu(DX12ForgeEngine& engine)
     ImGui::SameLine();
     if (ImGui::SmallButton(ICON_REFRESH "  Compile C#")) CompileScripts();
     ImGui::SameLine(ImGui::GetWindowWidth() - 188.0f);
-    ImGui::TextColored(Accent(), "DX12 FORGE");
+    ImGui::TextColored(Accent(), "FORGE ENGINE");
     ImGui::SameLine();
-    ImGui::TextDisabled("v0.5.9");
+    ImGui::TextDisabled("v0.5.10");
     ImGui::EndMenuBar();
     }
 }
 
-void DX12ForgeEditorUI::EnsureDefaultDockLayout(ImGuiID dockspaceId, const ImVec2& size)
+void ForgeEditorUI::EnsureDefaultDockLayout(ImGuiID dockspaceId, const ImVec2& size)
 {
     if (m_dockLayoutInitialized)
         return;
@@ -1700,7 +1737,7 @@ void DX12ForgeEditorUI::EnsureDefaultDockLayout(ImGuiID dockspaceId, const ImVec
     ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.22f, &left, &center);
     if (left == 0 || center == 0)
     {
-        OutputDebugStringA("DX12 Forge: could not create left dock node; keeping a single scene dockspace.\n");
+        OutputDebugStringA("Forge Engine: could not create left dock node; keeping a single scene dockspace.\n");
         ImGui::DockBuilderFinish(dockspaceId);
         m_dockLayoutInitialized = true;
         m_forceDefaultDockLayout = false;
@@ -1723,7 +1760,7 @@ void DX12ForgeEditorUI::EnsureDefaultDockLayout(ImGuiID dockspaceId, const ImVec
     m_forceDefaultDockLayout = false;
 }
 
-void DX12ForgeEditorUI::DrawHierarchy(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawHierarchy(ForgeEngine& engine)
 {
     const bool windowVisible = ImGui::Begin(ICON_LIST "  Scene Hierarchy", &m_showHierarchy);
     if (windowVisible)
@@ -1816,9 +1853,9 @@ void DX12ForgeEditorUI::DrawHierarchy(DX12ForgeEngine& engine)
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
             if (engine.m_selectedObject == i) flags |= ImGuiTreeNodeFlags_Selected;
             if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-            const char* icon = object.lightType == DX12ForgeEngine::LightType::Directional ? "[SUN] " :
-                object.lightType == DX12ForgeEngine::LightType::Point ? "[PNT] " :
-                object.lightType == DX12ForgeEngine::LightType::Spot ? "[SPT] " :
+            const char* icon = object.lightType == ForgeEngine::LightType::Directional ? "[SUN] " :
+                object.lightType == ForgeEngine::LightType::Point ? "[PNT] " :
+                object.lightType == ForgeEngine::LightType::Spot ? "[SPT] " :
                 object.isCamera ? "[CAM] " : object.isTerrain ? "[TRN] " :
                 object.mesh == &engine.m_sphereMesh ? "[SPH] " : "[OBJ] ";
             std::string label = std::string(icon) + object.name;
@@ -1902,7 +1939,7 @@ void DX12ForgeEditorUI::DrawHierarchy(DX12ForgeEngine& engine)
 
 }
 
-void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawInspector(ForgeEngine& engine)
 {
     const bool windowVisible = ImGui::Begin(ICON_EDIT "  Object Inspector", &m_showInspector);
     if (windowVisible)
@@ -1938,7 +1975,7 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
         if (ImGui::InputFloat3("Rotation", rotation, "%.1f deg"))
         {
             object.rotation = { rotation[0] * Pi / 180.0f, rotation[1] * Pi / 180.0f, rotation[2] * Pi / 180.0f };
-            if (object.lightType == DX12ForgeEngine::LightType::Directional)
+            if (object.lightType == ForgeEngine::LightType::Directional)
             {
                 engine.m_timeOfDayDrivesSun = false;
                 engine.m_directionalObjectTransformDrivesSun = true;
@@ -1970,37 +2007,76 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
 
     if (object.isCamera && ImGui::CollapsingHeader("Camera Component", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::SliderFloat("Field of View", &object.cameraFieldOfView, 20.0f, 110.0f, "%.1f deg");
+        ImGui::Checkbox("Orthographic", &object.cameraOrthographic);
+        if (object.cameraOrthographic)
+        {
+            ImGui::DragFloat("Orthographic Size", &object.cameraOrthographicSize, 0.05f, 0.1f, 500.0f, "%.2f");
+        }
+        else
+        {
+            ImGui::SliderFloat("Field of View", &object.cameraFieldOfView, 20.0f, 110.0f, "%.1f deg");
+        }
         ImGui::DragFloat("Near Clip", &object.cameraNearClip, 0.01f, 0.01f, 5.0f, "%.2f");
         ImGui::DragFloat("Far Clip", &object.cameraFarClip, 1.0f, 10.0f, 5000.0f, "%.0f");
-        ImGui::TextDisabled("Camera component settings are stored on this object.");
+        ImGui::DragInt("Depth", &object.cameraDepth, 1.0f, -100, 100);
+        ImGui::ColorEdit4("Background", &object.cameraBackgroundColor.x);
+        ImGui::Checkbox("Draw Skybox", &object.cameraDrawSkybox);
+        ImGui::Checkbox("Draw Gizmos", &object.cameraDrawGizmos);
+        ImGui::TextDisabled("Culling Mask");
+        for (int layerIndex = 0; layerIndex < 8; ++layerIndex)
+        {
+            ImGui::PushID(layerIndex);
+            bool layerEnabled = (object.cameraCullingMask & (1 << layerIndex)) != 0;
+            if (ImGui::Checkbox("##Mask", &layerEnabled))
+                object.cameraCullingMask = layerEnabled
+                    ? (object.cameraCullingMask | (1 << layerIndex))
+                    : (object.cameraCullingMask & ~(1 << layerIndex));
+            ImGui::SameLine();
+            ImGui::Text("Layer %d", layerIndex);
+            ImGui::PopID();
+        }
+        ImGui::Separator();
+        if (ImGui::Button("Look Through This Camera", ImVec2(-1.0f, 0.0f)))
+        {
+            engine.m_viewportCameraObjectIndex = engine.m_selectedObject;
+            engine.m_cameraPosition = object.position;
+            engine.m_cameraYaw = object.rotation.y;
+            engine.m_cameraPitch = std::clamp(-object.rotation.x, -1.50f, 1.50f);
+            engine.m_editorCameraFov = std::clamp(object.cameraFieldOfView, 20.0f, 110.0f);
+            engine.RebuildWorldTransform(object);
+            engine.UpdateCamera(0.0f);
+            Log("Active camera now drives the Scene viewport.");
+        }
+        ImGui::TextDisabled(engine.m_viewportCameraObjectIndex == engine.m_selectedObject
+            ? "This camera is currently rendering the Scene viewport."
+            : "Use this to render the Scene viewport through the camera, Unity-style.");
     }
 
-    if (object.lightType != DX12ForgeEngine::LightType::None &&
+    if (object.lightType != ForgeEngine::LightType::None &&
         ImGui::CollapsingHeader("Light Component", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        const char* typeName = object.lightType == DX12ForgeEngine::LightType::Directional ? "Directional Light / Sun" :
-            object.lightType == DX12ForgeEngine::LightType::Point ? "Point Light" : "Spot Light";
+        const char* typeName = object.lightType == ForgeEngine::LightType::Directional ? "Directional Light / Sun" :
+            object.lightType == ForgeEngine::LightType::Point ? "Point Light" : "Spot Light";
         ImGui::TextColored(Accent(), "%s", typeName);
         ImGui::Checkbox("Light Enabled", &object.lightEnabled);
         ImGui::ColorEdit3("Light Color", &object.lightColor.x);
         ImGui::SliderFloat("Intensity##LightComponent", &object.lightIntensity, 0.0f,
-            object.lightType == DX12ForgeEngine::LightType::Directional ? 10.0f : 180.0f, "%.2f");
-        if (object.lightType != DX12ForgeEngine::LightType::Directional)
+            object.lightType == ForgeEngine::LightType::Directional ? 10.0f : 180.0f, "%.2f");
+        if (object.lightType != ForgeEngine::LightType::Directional)
             ImGui::SliderFloat("Range##LightComponent", &object.lightRange, 0.5f, 80.0f, "%.1f m");
-        if (object.lightType == DX12ForgeEngine::LightType::Spot)
+        if (object.lightType == ForgeEngine::LightType::Spot)
         {
             ImGui::SliderFloat("Inner Cone##LightComponent", &object.lightInnerAngle, 1.0f, 87.0f, "%.0f deg");
             ImGui::SliderFloat("Outer Cone##LightComponent", &object.lightOuterAngle, 2.0f, 89.0f, "%.0f deg");
             if (object.lightOuterAngle <= object.lightInnerAngle)
                 object.lightOuterAngle = std::min(89.0f, object.lightInnerAngle + 1.0f);
         }
-        if (object.lightType == DX12ForgeEngine::LightType::Directional)
+        if (object.lightType == ForgeEngine::LightType::Directional)
         {
             ImGui::TextWrapped("Rotate this object to steer the sun when the Time of Day control is not driving it.");
             ImGui::TextDisabled("The sky, sunlight and directional shadow follow this light.");
         }
-        else if (object.lightType == DX12ForgeEngine::LightType::Spot)
+        else if (object.lightType == ForgeEngine::LightType::Spot)
             ImGui::TextDisabled("Rotate the object to aim the spotlight cone.");
         engine.RebuildWorldTransform(object);
     }
@@ -2010,9 +2086,9 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
         ImGui::Checkbox("Enabled", &object.meshRendererEnabled);
         ImGui::Checkbox("Cast Shadows", &object.castShadows);
         const char* meshLabel = "Cube / Imported Mesh";
-        if (object.lightType == DX12ForgeEngine::LightType::Directional) meshLabel = "Directional Light Gizmo";
-        else if (object.lightType == DX12ForgeEngine::LightType::Point) meshLabel = "Point Light Gizmo";
-        else if (object.lightType == DX12ForgeEngine::LightType::Spot) meshLabel = "Spot Light Gizmo";
+        if (object.lightType == ForgeEngine::LightType::Directional) meshLabel = "Directional Light Gizmo";
+        else if (object.lightType == ForgeEngine::LightType::Point) meshLabel = "Point Light Gizmo";
+        else if (object.lightType == ForgeEngine::LightType::Spot) meshLabel = "Spot Light Gizmo";
         else if (object.mesh == &engine.m_sphereMesh) meshLabel = "Sphere";
         else if (object.mesh == &engine.m_primitiveMeshes[0]) meshLabel = "Plane";
         else if (object.mesh == &engine.m_primitiveMeshes[1]) meshLabel = "Cylinder";
@@ -2022,12 +2098,19 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
         ImGui::TextDisabled("Renderer: DirectX 12 / PBR");
     }
 
-    if (ImGui::CollapsingHeader("Material / PBR", ImGuiTreeNodeFlags_DefaultOpen))
+    if (object.hasMaterial && ImGui::CollapsingHeader("Material / PBR", ImGuiTreeNodeFlags_DefaultOpen))
     {
         ImGui::ColorEdit4("Base Color", &object.baseColor.x,
             ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_Uint8);
         ImGui::SliderFloat("Metallic", &object.metallic, 0.0f, 1.0f, "%.3f");
         ImGui::SliderFloat("Roughness", &object.roughness, 0.045f, 1.0f, "%.3f");
+        ImGui::SliderFloat("Normal Map Scale", &object.normalMapScale, 0.0f, 3.0f, "%.2f");
+        ImGui::SliderFloat("AO Strength", &object.occlusionStrength, 0.0f, 1.0f, "%.2f");
+        ImGui::Checkbox("Double Sided", &object.doubleSided);
+        ImGui::TextColored(Accent(), "Emission");
+        ImGui::ColorEdit3("Emissive Color", &object.emissiveColor.x,
+            ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_Uint8);
+        ImGui::SliderFloat("Emissive Intensity", &object.emissiveIntensity, 0.0f, 12.0f, "%.2f");
         ImGui::Separator();
         ImGui::TextColored(Accent(), "Texture Coordinates (UV)");
         ImGui::DragFloat2("Tiling U / V", &object.textureTiling.x, 0.025f, -100.0f, 100.0f, "%.3f");
@@ -2084,7 +2167,8 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
         textureRow("Normal Map", object.normalTexturePath, TextureSlot::Normal);
         textureRow("Metallic / Roughness Map", object.metallicRoughnessTexturePath, TextureSlot::MetallicRoughness);
         textureRow("Ambient Occlusion Map", object.aoTexturePath, TextureSlot::AmbientOcclusion);
-        ImGui::TextWrapped("Albedo is sampled as base color. Normal maps perturb the surface normal; packed Metallic/Roughness maps use B=metallic and G=roughness (glTF convention); AO maps use the red channel. UV tiling and offset affect every assigned map.");
+        textureRow("Emissive Map", object.emissiveTexturePath, TextureSlot::Emissive);
+        ImGui::TextWrapped("Albedo is sampled as base color. Normal maps perturb the surface normal (scale is adjustable above); packed Metallic/Roughness maps use B=metallic and G=roughness (glTF convention); AO maps use the red channel; emissive maps multiply the Emissive Color. UV tiling and offset affect every assigned map.");
     }
 
     if (ImGui::CollapsingHeader("Components", ImGuiTreeNodeFlags_DefaultOpen))
@@ -2114,6 +2198,12 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
             if (ImGui::Combo("Collider Type", &colliderType, colliderTypes, IM_ARRAYSIZE(colliderTypes)))
                 object.colliderType = colliderType;
             ImGui::DragFloat3("Collider Size", &object.colliderSize.x, 0.05f, 0.01f, 100.0f, "%.2f");
+            ImGui::DragFloat3("Collider Center", &object.colliderCenter.x, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##ColliderCenter"))
+                object.colliderCenter = { 0.0f, 0.0f, 0.0f };
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Local-space offset of the collision shape from the object origin.");
             ImGui::Checkbox("Is Trigger", &object.isTrigger);
         }
         ImGui::Checkbox("Rigidbody component", &object.hasRigidbody);
@@ -2124,16 +2214,124 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
             ImGui::Checkbox("Is Kinematic", &object.rigidbodyIsKinematic);
         }
         ImGui::Checkbox("Audio Source component", &object.hasAudioSource);
+        if (object.hasAudioSource)
+        {
+            ImGui::DragFloat("Volume", &object.audioSourceVolume, 0.01f, 0.0f, 4.0f, "%.2f");
+            ImGui::DragFloat("Pitch", &object.audioSourcePitch, 0.01f, 0.1f, 3.0f, "%.2f");
+            ImGui::Checkbox("Loop", &object.audioSourceLoop);
+            ImGui::Checkbox("Play On Awake", &object.audioSourcePlayOnAwake);
+            ImGui::Checkbox("Spatial Blend (3D)", &object.audioSourceSpatial);
+            if (object.audioSourceSpatial)
+            {
+                ImGui::DragFloat("Min Distance", &object.audioSourceMinDistance, 0.05f, 0.01f, 1000.0f, "%.2f");
+                ImGui::DragFloat("Max Distance", &object.audioSourceMaxDistance, 1.0f, 0.1f, 10000.0f, "%.1f");
+            }
+            ImGui::TextDisabled("Clip: %s", object.audioSourceClipPath.empty() ? "(none)" : object.audioSourceClipPath.c_str());
+        }
+
+        ImGui::Checkbox("Audio Listener component", &object.hasAudioListener);
+        if (object.hasAudioListener)
+        {
+            ImGui::DragFloat("Listener Volume", &object.audioListenerVolume, 0.01f, 0.0f, 4.0f, "%.2f");
+            ImGui::TextDisabled("Place exactly one listener; it defines the ear transform.");
+        }
+
+        ImGui::Checkbox("Character Controller component", &object.hasCharacterController);
+        if (object.hasCharacterController)
+        {
+            ImGui::DragFloat("Height", &object.characterHeight, 0.05f, 0.2f, 20.0f, "%.2f");
+            ImGui::DragFloat("Radius", &object.characterRadius, 0.02f, 0.05f, 10.0f, "%.3f");
+            ImGui::DragFloat("Slope Limit", &object.characterSlopeLimit, 0.5f, 0.0f, 89.0f, "%.1f deg");
+            ImGui::DragFloat("Step Offset", &object.characterStepOffset, 0.01f, 0.0f, 2.0f, "%.3f");
+            ImGui::DragFloat("Skin Width", &object.characterSkinWidth, 0.001f, 0.0f, 0.5f, "%.3f");
+            ImGui::DragFloat("Gravity", &object.characterGravity, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Move Speed", &object.characterSpeed, 0.1f, 0.0f, 200.0f, "%.2f");
+            ImGui::DragFloat("Jump Height", &object.characterJumpHeight, 0.05f, 0.0f, 50.0f, "%.2f");
+            ImGui::Text("Grounded: %s", object.characterIsGrounded ? "yes" : "no");
+            ImGui::DragFloat3("Velocity", &object.characterVelocity.x, 0.05f, -1000.0f, 1000.0f, "%.2f");
+        }
+
+        ImGui::Checkbox("Particle System component", &object.hasParticleSystem);
+        if (object.hasParticleSystem)
+        {
+            ImGui::DragInt("Max Particles", &object.particleMaxCount, 8.0f, 1, 100000);
+            ImGui::DragFloat("Lifetime", &object.particleLifetime, 0.05f, 0.05f, 120.0f, "%.2f");
+            ImGui::DragFloat("Start Speed", &object.particleStartSpeed, 0.05f, 0.0f, 200.0f, "%.2f");
+            ImGui::DragFloat("Start Size", &object.particleStartSize, 0.01f, 0.001f, 10.0f, "%.3f");
+            ImGui::DragFloat("Gravity", &object.particleGravity, 0.05f, -100.0f, 100.0f, "%.2f");
+            ImGui::DragFloat("Emission Rate", &object.particleEmissionRate, 1.0f, 0.0f, 10000.0f, "%.1f /s");
+            ImGui::ColorEdit3("Start Color", &object.particleStartColor.x);
+            ImGui::DragFloat3("Direction", &object.particleDirection.x, 0.02f, -1.0f, 1.0f, "%.3f");
+            ImGui::DragFloat("Spread", &object.particleSpread, 0.5f, 0.0f, 180.0f, "%.1f deg");
+            ImGui::Checkbox("Looping", &object.particleLooping);
+        }
+
+        ImGui::Checkbox("Animator component", &object.hasAnimator);
+        if (object.hasAnimator)
+        {
+            ImGui::TextDisabled("Clip: %s", object.animatorClipName.empty() ? "(none)" : object.animatorClipName.c_str());
+            ImGui::DragFloat("Speed", &object.animatorSpeed, 0.01f, -10.0f, 10.0f, "%.2f");
+            ImGui::Checkbox("Loop", &object.animatorLoop);
+            ImGui::Checkbox("Playing", &object.animatorPlaying);
+            ImGui::DragFloat("Time", &object.animatorTime, 0.01f, 0.0f, 3600.0f, "%.3f s");
+        }
         ImGui::Separator();
         if (ImGui::Button("+ Add Component", ImVec2(-1.0f, 0.0f)))
             ImGui::OpenPopup("Add Component Popup");
         if (ImGui::BeginPopup("Add Component Popup"))
         {
+            if (ImGui::BeginMenu("Rendering"))
+            {
+                if (ImGui::MenuItem("Mesh Renderer", nullptr, object.meshRendererEnabled)) object.meshRendererEnabled = !object.meshRendererEnabled;
+                if (ImGui::MenuItem("Material (PBR)", nullptr, object.hasMaterial)) object.hasMaterial = !object.hasMaterial;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Physics"))
+            {
+                if (ImGui::MenuItem("Collider", nullptr, object.hasCollider)) object.hasCollider = !object.hasCollider;
+                if (ImGui::MenuItem("Rigidbody", nullptr, object.hasRigidbody)) object.hasRigidbody = !object.hasRigidbody;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Camera & Audio"))
+            {
+                if (ImGui::MenuItem("Camera", nullptr, object.isCamera))
+                {
+                    object.isCamera = !object.isCamera;
+                    if (object.isCamera) engine.m_viewportCameraObjectIndex = -1;
+                }
+                if (ImGui::MenuItem("Audio Source", nullptr, object.hasAudioSource)) object.hasAudioSource = !object.hasAudioSource;
+                if (ImGui::MenuItem("Audio Listener", nullptr, object.hasAudioListener)) object.hasAudioListener = !object.hasAudioListener;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Effects"))
+            {
+                if (ImGui::MenuItem("Particle System", nullptr, object.hasParticleSystem)) object.hasParticleSystem = !object.hasParticleSystem;
+                if (ImGui::MenuItem("Animator", nullptr, object.hasAnimator)) object.hasAnimator = !object.hasAnimator;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Character"))
+            {
+                if (ImGui::MenuItem("Character Controller", nullptr, object.hasCharacterController)) object.hasCharacterController = !object.hasCharacterController;
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Lighting"))
+            {
+                const bool isLight = object.lightType != ForgeEngine::LightType::None;
+                if (ImGui::MenuItem("Directional Light", nullptr, object.lightType == ForgeEngine::LightType::Directional))
+                    object.lightType = object.lightType == ForgeEngine::LightType::Directional ? ForgeEngine::LightType::None : ForgeEngine::LightType::Directional;
+                if (ImGui::MenuItem("Point Light", nullptr, object.lightType == ForgeEngine::LightType::Point))
+                    object.lightType = object.lightType == ForgeEngine::LightType::Point ? ForgeEngine::LightType::None : ForgeEngine::LightType::Point;
+                if (ImGui::MenuItem("Spot Light", nullptr, object.lightType == ForgeEngine::LightType::Spot))
+                    object.lightType = object.lightType == ForgeEngine::LightType::Spot ? ForgeEngine::LightType::None : ForgeEngine::LightType::Spot;
+                if (isLight)
+                {
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Remove Light")) object.lightType = ForgeEngine::LightType::None;
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Script C#")) RequestCreateScript(engine.m_selectedObject);
-            if (ImGui::MenuItem("Collider", nullptr, object.hasCollider)) object.hasCollider = !object.hasCollider;
-            if (ImGui::MenuItem("Rigidbody", nullptr, object.hasRigidbody)) object.hasRigidbody = !object.hasRigidbody;
-            if (ImGui::MenuItem("Audio Source", nullptr, object.hasAudioSource)) object.hasAudioSource = !object.hasAudioSource;
-            if (ImGui::MenuItem("Mesh Renderer", nullptr, object.meshRendererEnabled)) object.meshRendererEnabled = !object.meshRendererEnabled;
             ImGui::EndPopup();
         }
         if (!object.scriptComponents.empty())
@@ -2194,9 +2392,9 @@ void DX12ForgeEditorUI::DrawInspector(DX12ForgeEngine& engine)
 
 }
 
-void DX12ForgeEditorUI::DrawLightingPanel(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawLightingPanel(ForgeEngine& engine)
 {
-    using LightType = DX12ForgeEngine::LightType;
+    using LightType = ForgeEngine::LightType;
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + 380.0f, viewport->WorkPos.y + 64.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(370.0f, 640.0f), ImGuiCond_FirstUseEver);
@@ -2206,7 +2404,7 @@ void DX12ForgeEditorUI::DrawLightingPanel(DX12ForgeEngine& engine)
         return;
     }
 
-    auto findLight = [&](LightType type) -> DX12ForgeEngine::GameObject*
+    auto findLight = [&](LightType type) -> ForgeEngine::GameObject*
     {
         if (engine.m_selectedObject >= 0 && engine.m_selectedObject < static_cast<int>(engine.m_objects.size()))
         {
@@ -2353,7 +2551,7 @@ void DX12ForgeEditorUI::DrawLightingPanel(DX12ForgeEngine& engine)
     ImGui::End();
 }
 
-void DX12ForgeEditorUI::RefreshAssetCache()
+void ForgeEditorUI::RefreshAssetCache()
 {
     const auto now = std::chrono::steady_clock::now();
     const bool folderChanged = m_assetListingFolder != m_activeAssetFolder;
@@ -2421,7 +2619,7 @@ void DX12ForgeEditorUI::RefreshAssetCache()
     if (treeOk) m_subfolderCache.swap(tree);
 }
 
-void DX12ForgeEditorUI::DrawProjectBrowser(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawProjectBrowser(ForgeEngine& engine)
 {
     const bool windowVisible = ImGui::Begin(ICON_FOLDER "  Project Files", &m_showProject);
     if (windowVisible)
@@ -2738,7 +2936,7 @@ void DX12ForgeEditorUI::DrawProjectBrowser(DX12ForgeEngine& engine)
     }
 }
 
-void DX12ForgeEditorUI::DrawPostProcessSettings(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawPostProcessSettings(ForgeEngine& engine)
 {
     if (!m_showPostProcess) return;
     ImGui::SetNextWindowSize(ImVec2(360, 470), ImGuiCond_FirstUseEver);
@@ -2783,7 +2981,7 @@ void DX12ForgeEditorUI::DrawPostProcessSettings(DX12ForgeEngine& engine)
     ImGui::End();
 }
 
-void DX12ForgeEditorUI::LoadProjectPostProcess(DX12ForgeEngine& engine)
+void ForgeEditorUI::LoadProjectPostProcess(ForgeEngine& engine)
 {
     const auto path = m_projectRoot / L"Presets" / L"ActivePostProcessing.forgePreset";
     std::ifstream in(path, std::ios::binary);
@@ -2796,7 +2994,7 @@ void DX12ForgeEditorUI::LoadProjectPostProcess(DX12ForgeEngine& engine)
            >> options.x >> options.y >> options.z >> options.w
            >> motion.z >> motion.w;
         const auto finite = [](float value) { return std::isfinite(value); };
-        if (in && signature == "DX12FORGE_POSTPROCESS" && version == 1 &&
+        if (in && (signature == "FORGEENGINE_POSTPROCESS" || signature == "DX12FORGE_POSTPROCESS") && version == 1 &&
             finite(parameters.x) && finite(parameters.y) && finite(parameters.z) && finite(parameters.w) &&
             finite(options.x) && finite(options.y) && finite(options.z) && finite(options.w) &&
             finite(motion.z) && finite(motion.w))
@@ -2817,7 +3015,7 @@ void DX12ForgeEditorUI::LoadProjectPostProcess(DX12ForgeEngine& engine)
     SaveProjectPostProcess(engine);
 }
 
-void DX12ForgeEditorUI::SaveProjectPostProcess(const DX12ForgeEngine& engine) const
+void ForgeEditorUI::SaveProjectPostProcess(const ForgeEngine& engine) const
 {
     if (m_projectRoot.empty()) return;
     std::error_code ec;
@@ -2827,7 +3025,7 @@ void DX12ForgeEditorUI::SaveProjectPostProcess(const DX12ForgeEngine& engine) co
     std::ofstream out(directory / L"ActivePostProcessing.forgePreset", std::ios::binary | std::ios::trunc);
     if (!out) return;
     out << std::setprecision(9)
-        << "DX12FORGE_POSTPROCESS 1\n"
+        << "FORGEENGINE_POSTPROCESS 1\n"
         << engine.m_postProcessParameters.x << ' ' << engine.m_postProcessParameters.y << ' '
         << engine.m_postProcessParameters.z << ' ' << engine.m_postProcessParameters.w << '\n'
         << engine.m_postProcessOptions.x << ' ' << engine.m_postProcessOptions.y << ' '
@@ -2835,7 +3033,7 @@ void DX12ForgeEditorUI::SaveProjectPostProcess(const DX12ForgeEngine& engine) co
         << engine.m_postProcessMotion.z << ' ' << engine.m_postProcessMotion.w << '\n';
 }
 
-bool DX12ForgeEditorUI::OpenProject(DX12ForgeEngine& engine, const std::filesystem::path& projectPath)
+bool ForgeEditorUI::OpenProject(ForgeEngine& engine, const std::filesystem::path& projectPath)
 {
     std::filesystem::path root = projectPath;
     std::error_code ec;
@@ -2844,12 +3042,12 @@ bool DX12ForgeEditorUI::OpenProject(DX12ForgeEngine& engine, const std::filesyst
     std::filesystem::create_directories(root, ec);
     if (ec) { Log("ERROR: Cannot access project folder: " + ec.message()); return false; }
 
-    const auto marker = root / L"DX12Forge.project";
+    const auto marker = root / L"ForgeEngine.project";
     if (!std::filesystem::exists(marker, ec))
     {
         std::ofstream project(marker, std::ios::binary | std::ios::trunc);
-        if (!project) { Log("ERROR: Cannot create DX12Forge.project in selected folder."); return false; }
-        project << "DX12FORGE_PROJECT 1\nName \"" << root.filename().string() << "\"\nEngineVersion \"0.5.9\"\nAssetRoot \"Assets\"\n";
+        if (!project) { Log("ERROR: Cannot create ForgeEngine.project in selected folder."); return false; }
+        project << "FORGEENGINE_PROJECT 1\nName \"" << root.filename().string() << "\"\nEngineVersion \"0.5.10\"\nAssetRoot \"Assets\"\n";
     }
 
     if (m_scriptRuntime) m_scriptRuntime->Stop();
@@ -2967,18 +3165,18 @@ bool DX12ForgeEditorUI::OpenProject(DX12ForgeEngine& engine, const std::filesyst
     return true;
 }
 
-void DX12ForgeEditorUI::OpenProjectDialog(DX12ForgeEngine& engine)
+void ForgeEditorUI::OpenProjectDialog(ForgeEngine& engine)
 {
     std::array<wchar_t, 32768> fileName{};
     std::wstring initial = m_projectRoot.empty() ? m_sourceRoot.wstring() : m_projectRoot.wstring();
     OPENFILENAMEW ofn{}; ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = engine.m_hwnd;
-    ofn.lpstrFilter = L"DX12 Forge Project (DX12Forge.project)\0DX12Forge.project\0Project files (*.project)\0*.project\0All files (*.*)\0*.*\0\0";
+    ofn.lpstrFilter = L"Forge Engine Project (ForgeEngine.project)\0ForgeEngine.project\0Project files (*.project)\0*.project\0All files (*.*)\0*.*\0\0";
     ofn.lpstrFile = fileName.data(); ofn.nMaxFile = static_cast<DWORD>(fileName.size());
     ofn.lpstrInitialDir = initial.c_str(); ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetOpenFileNameW(&ofn)) OpenProject(engine, std::filesystem::path(fileName.data()));
 }
 
-void DX12ForgeEditorUI::CreateProjectFromDialog(DX12ForgeEngine& engine)
+void ForgeEditorUI::CreateProjectFromDialog(ForgeEngine& engine)
 {
     const std::string nameText = m_newProjectName;
     const std::filesystem::path name = std::filesystem::u8path(nameText);
@@ -2992,11 +3190,11 @@ void DX12ForgeEditorUI::CreateProjectFromDialog(DX12ForgeEngine& engine)
     std::error_code ec;
     std::filesystem::create_directories(root, ec);
     if (ec) { Log("ERROR: Could not create project: " + ec.message()); return; }
-    const auto projectFile = root / L"DX12Forge.project";
+    const auto projectFile = root / L"ForgeEngine.project";
     {
         std::ofstream f(projectFile, std::ios::binary | std::ios::trunc);
         if (!f) { Log("ERROR: Cannot write project metadata."); return; }
-        f << "DX12FORGE_PROJECT 1\nName \"" << name.string() << "\"\nEngineVersion \"0.5.9\"\nAssetRoot \"Assets\"\nCreatedUtc \"";
+        f << "FORGEENGINE_PROJECT 1\nName \"" << name.string() << "\"\nEngineVersion \"0.5.10\"\nAssetRoot \"Assets\"\nCreatedUtc \"";
         const auto now = std::chrono::system_clock::now();
         const auto stamp = std::chrono::system_clock::to_time_t(now);
         std::tm tm{}; gmtime_s(&tm, &stamp); char date[32]{}; std::strftime(date, sizeof(date), "%Y-%m-%d %H:%M UTC", &tm); f << date << "\"\n";
@@ -3005,7 +3203,7 @@ void DX12ForgeEditorUI::CreateProjectFromDialog(DX12ForgeEngine& engine)
     ImGui::CloseCurrentPopup();
 }
 
-void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawWelcome(ForgeEngine& engine)
 {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
@@ -3015,7 +3213,7 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.035f, 0.045f, 0.07f, 1.0f));
-    ImGui::Begin("DX12 Forge Project Hub##fullscreen", nullptr,
+    ImGui::Begin("Forge Engine Project Hub##fullscreen", nullptr,
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImGui::PopStyleColor(); ImGui::PopStyleVar(3);
@@ -3023,7 +3221,7 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
     ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
     DrawWindowChrome(engine);
     ImGui::SetCursorPos(ImVec2(30.0f, 48.0f));
-    ImGui::TextColored(Accent(), "DX12 FORGE ENGINE");
+    ImGui::TextColored(Accent(), "FORGE ENGINE");
     ImGui::SameLine(); ImGui::TextDisabled("/ PROJECT HUB");
     ImGui::Separator(); ImGui::Spacing();
     ImGui::Text("Welcome back.");
@@ -3052,7 +3250,7 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
     for (std::filesystem::directory_iterator it(projectsDir, scanEc), end; !scanEc && it != end; it.increment(scanEc))
     {
         if (!it->is_directory(scanEc)) continue;
-        const auto marker = it->path() / L"DX12Forge.project";
+        const auto marker = it->path() / L"ForgeEngine.project";
         if (!std::filesystem::exists(marker, scanEc)) continue;
         bool seen = false; for (const auto& c : cards) if (c.lexically_normal() == it->path().lexically_normal()) seen = true;
         if (!seen) cards.push_back(it->path());
@@ -3075,11 +3273,11 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
         ImGui::BeginGroup();
         ImGui::TextWrapped("%s", project.filename().string().c_str());
         std::string createdDate = "Project folder";
-        std::ifstream meta(project / L"DX12Forge.project"); std::string line;
+        std::ifstream meta(project / L"ForgeEngine.project"); std::string line;
         while (std::getline(meta,line)) if (line.rfind("CreatedUtc ",0)==0) { createdDate = line.substr(11); if (createdDate.size()>=2 && createdDate.front()=='"' && createdDate.back()=='"') createdDate=createdDate.substr(1,createdDate.size()-2); break; }
         if (createdDate == "Project folder")
         {
-            std::error_code timeEc; const auto ft = std::filesystem::last_write_time(project / L"DX12Forge.project", timeEc);
+            std::error_code timeEc; const auto ft = std::filesystem::last_write_time(project / L"ForgeEngine.project", timeEc);
             if (!timeEc) { const auto sys = std::chrono::time_point_cast<std::chrono::system_clock::duration>(ft - decltype(ft)::clock::now() + std::chrono::system_clock::now()); const auto t = std::chrono::system_clock::to_time_t(sys); std::tm tm{}; localtime_s(&tm, &t); char date[40]{}; std::strftime(date,sizeof(date),"%Y-%m-%d",&tm); createdDate=date; }
         }
         ImGui::TextDisabled("Created: %s", createdDate.c_str());
@@ -3093,7 +3291,7 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
     if (m_showCreateProject && !ImGui::IsPopupOpen("CreateForgeProject")) ImGui::OpenPopup("CreateForgeProject");
     if (ImGui::BeginPopupModal("CreateForgeProject", &m_showCreateProject, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::Text("Create a new DX12 Forge project"); ImGui::Separator();
+        ImGui::Text("Create a new Forge Engine project"); ImGui::Separator();
         ImGui::SetNextItemWidth(370); ImGui::InputText("Project name", m_newProjectName, sizeof(m_newProjectName));
         ImGui::SetNextItemWidth(330); ImGui::InputText("Location", m_newProjectLocation, sizeof(m_newProjectLocation));
         ImGui::SameLine();
@@ -3114,7 +3312,7 @@ void DX12ForgeEditorUI::DrawWelcome(DX12ForgeEngine& engine)
     ImGui::End();
 }
 
-void DX12ForgeEditorUI::DrawStatsOverlay(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawStatsOverlay(ForgeEngine& engine)
 {
     ImGui::SetNextWindowSize(ImVec2(250.0f, 0.0f), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin(ICON_CHART "  Stats", &m_showStats))
@@ -3153,7 +3351,7 @@ void DX12ForgeEditorUI::DrawStatsOverlay(DX12ForgeEngine& engine)
     ImGui::End();
 }
 
-void DX12ForgeEditorUI::RequestViewportScreenshot(DX12ForgeEngine& engine)
+void ForgeEditorUI::RequestViewportScreenshot(ForgeEngine& engine)
 {
     std::error_code ec;
     const auto baseDir = m_projectRoot.empty()
@@ -3169,7 +3367,7 @@ void DX12ForgeEditorUI::RequestViewportScreenshot(DX12ForgeEngine& engine)
     Log("Screenshot requested: " + std::string(name));
 }
 
-void DX12ForgeEditorUI::DrawConsole()
+void ForgeEditorUI::DrawConsole()
 {
     const bool windowVisible = ImGui::Begin(ICON_COMMAND "  Console", &m_showConsole);
     if (windowVisible)
@@ -3196,14 +3394,14 @@ void DX12ForgeEditorUI::DrawConsole()
 
 }
 
-void DX12ForgeEditorUI::DrawAboutWindow()
+void ForgeEditorUI::DrawAboutWindow()
 {
     if (!m_showAbout) return;
     ImGui::SetNextWindowSize(ImVec2(440, 250), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("About DX12 Forge Engine", &m_showAbout))
+    if (ImGui::Begin("About Forge Engine", &m_showAbout))
     {
-        ImGui::TextColored(Accent(), "DX12 FORGE ENGINE");
-        ImGui::Text("Editor 0.5.9   |   C++17   |   DirectX 12");
+        ImGui::TextColored(Accent(), "FORGE ENGINE");
+        ImGui::Text("Editor 0.5.10   |   C++17   |   DirectX 12");
         ImGui::Separator();
         ImGui::TextWrapped("A native 3D engine editor with a DirectX 12 render surface behind a dockable Dear ImGui interface and ImGuizmo transform manipulation and HDR post-processing.");
         ImGui::Spacing();
@@ -3212,14 +3410,14 @@ void DX12ForgeEditorUI::DrawAboutWindow()
     ImGui::End();
 }
 
-void DX12ForgeEditorUI::CreatePrimitive(DX12ForgeEngine& engine, bool sphere)
+void ForgeEditorUI::CreatePrimitive(ForgeEngine& engine, bool sphere)
 {
     CreatePrimitiveKind(engine, sphere ? 1 : 0);
 }
 
-void DX12ForgeEditorUI::CreatePrimitiveKind(DX12ForgeEngine& engine, int kind)
+void ForgeEditorUI::CreatePrimitiveKind(ForgeEngine& engine, int kind)
 {
-    DX12ForgeEngine::Mesh* mesh = &engine.m_cubeMesh;
+    ForgeEngine::Mesh* mesh = &engine.m_cubeMesh;
     const char* type = "Cube";
     XMFLOAT4 color{0.54f,0.58f,0.72f,1.0f};
     float radius = 1.732f;
@@ -3237,7 +3435,7 @@ void DX12ForgeEditorUI::CreatePrimitiveKind(DX12ForgeEngine& engine, int kind)
         const auto& selected=engine.m_objects[static_cast<size_t>(engine.m_selectedObject)];
         position=selected.position; position.x += 1.8f;
     }
-    DX12ForgeEngine::GameObject object;
+    ForgeEngine::GameObject object;
     object.name=std::string(type)+" "+std::to_string(serial); object.mesh=mesh;
     object.position=position; object.scale={1,1,1}; object.baseColor=color;
     object.metallic=0.05f; object.roughness=0.48f; object.localBoundsRadius=radius;
@@ -3248,12 +3446,12 @@ void DX12ForgeEditorUI::CreatePrimitiveKind(DX12ForgeEngine& engine, int kind)
     Log(std::string("Created ")+type+".");
 }
 
-void DX12ForgeEditorUI::CreateTerrainObject(DX12ForgeEngine& engine)
+void ForgeEditorUI::CreateTerrainObject(ForgeEngine& engine)
 {
     constexpr int cells = 64;
     constexpr float extent = 32.0f;
-    auto mesh = std::make_unique<DX12ForgeEngine::Mesh>();
-    std::vector<DX12ForgeEngine::Vertex> vertices;
+    auto mesh = std::make_unique<ForgeEngine::Mesh>();
+    std::vector<ForgeEngine::Vertex> vertices;
     std::vector<std::uint32_t> indices;
     vertices.reserve((cells + 1) * (cells + 1));
     indices.reserve(cells * cells * 6);
@@ -3263,7 +3461,7 @@ void DX12ForgeEditorUI::CreateTerrainObject(DX12ForgeEngine& engine)
         {
             const float u = static_cast<float>(x) / cells;
             const float v = static_cast<float>(z) / cells;
-            DX12ForgeEngine::Vertex vertex{};
+            ForgeEngine::Vertex vertex{};
             vertex.position = { (u - 0.5f) * extent, 0.0f, (v - 0.5f) * extent };
             vertex.normal = { 0.0f, 1.0f, 0.0f };
             vertex.uv = { u * 8.0f, v * 8.0f };
@@ -3282,10 +3480,10 @@ void DX12ForgeEditorUI::CreateTerrainObject(DX12ForgeEngine& engine)
         }
     }
     engine.CreateMesh(*mesh, vertices, indices);
-    DX12ForgeEngine::Mesh* meshPtr = mesh.get();
+    ForgeEngine::Mesh* meshPtr = mesh.get();
     engine.m_importedMeshes.push_back(std::move(mesh));
 
-    DX12ForgeEngine::GameObject object;
+    ForgeEngine::GameObject object;
     object.name = "Terrain " + std::to_string(engine.m_objects.size() + 1);
     object.mesh = meshPtr;
     object.position = { 0.0f, 0.0f, 0.0f };
@@ -3302,9 +3500,9 @@ void DX12ForgeEditorUI::CreateTerrainObject(DX12ForgeEngine& engine)
     Log("Created 64x64 editable terrain. Choose a brush in Inspector and drag in the viewport to sculpt.");
 }
 
-void DX12ForgeEditorUI::CreateCameraObject(DX12ForgeEngine& engine)
+void ForgeEditorUI::CreateCameraObject(ForgeEngine& engine)
 {
-    DX12ForgeEngine::GameObject object;
+    ForgeEngine::GameObject object;
     object.name = "Camera " + std::to_string(engine.m_objects.size() + 1);
     object.mesh = &engine.m_primitiveMeshes[2]; // small cone marker, visible in the editor
     object.position = { engine.m_cameraPosition.x, engine.m_cameraPosition.y, engine.m_cameraPosition.z };
@@ -3322,7 +3520,7 @@ void DX12ForgeEditorUI::CreateCameraObject(DX12ForgeEngine& engine)
     Log("Created Camera component. Select it and use Look Through Camera to switch the actual Scene viewport to this camera.");
 }
 
-void DX12ForgeEditorUI::ApplyTerrainBrush(DX12ForgeEngine& engine, float worldX, float worldZ, float deltaSeconds)
+void ForgeEditorUI::ApplyTerrainBrush(ForgeEngine& engine, float worldX, float worldZ, float deltaSeconds)
 {
     if (engine.m_selectedObject < 0 || engine.m_selectedObject >= static_cast<int>(engine.m_objects.size())) return;
     auto& terrain = engine.m_objects[static_cast<size_t>(engine.m_selectedObject)];
@@ -3402,10 +3600,10 @@ void DX12ForgeEditorUI::ApplyTerrainBrush(DX12ForgeEngine& engine, float worldX,
     }
 }
 
-void DX12ForgeEditorUI::CreateLightObject(DX12ForgeEngine& engine, int lightKind)
+void ForgeEditorUI::CreateLightObject(ForgeEngine& engine, int lightKind)
 {
-    using LightType = DX12ForgeEngine::LightType;
-    DX12ForgeEngine::GameObject object;
+    using LightType = ForgeEngine::LightType;
+    ForgeEngine::GameObject object;
     object.lightType = lightKind == 1 ? LightType::Directional :
         lightKind == 2 ? LightType::Point : LightType::Spot;
     const int serial = static_cast<int>(engine.m_objects.size()) + 1;
@@ -3483,7 +3681,7 @@ static std::filesystem::path FirstMaterialTexturePath(const aiScene* scene, aiTe
     return {};
 }
 
-bool DX12ForgeEditorUI::InstantiateObj(DX12ForgeEngine& engine, const std::filesystem::path& path)
+bool ForgeEditorUI::InstantiateObj(ForgeEngine& engine, const std::filesystem::path& path)
 {
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(path.string(),
@@ -3495,8 +3693,8 @@ bool DX12ForgeEditorUI::InstantiateObj(DX12ForgeEngine& engine, const std::files
         return false;
     }
 
-    auto mesh = std::make_unique<DX12ForgeEngine::Mesh>();
-    std::vector<DX12ForgeEngine::Vertex> vertices;
+    auto mesh = std::make_unique<ForgeEngine::Mesh>();
+    std::vector<ForgeEngine::Vertex> vertices;
     std::vector<std::uint32_t> indices;
     XMFLOAT3 boundsMin{ FLT_MAX, FLT_MAX, FLT_MAX };
     XMFLOAT3 boundsMax{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
@@ -3506,7 +3704,7 @@ bool DX12ForgeEditorUI::InstantiateObj(DX12ForgeEngine& engine, const std::files
         if (!source || !source->HasPositions()) continue;
         const std::uint32_t baseVertex = static_cast<std::uint32_t>(vertices.size());
         for (unsigned int v = 0; v < source->mNumVertices; ++v) {
-            DX12ForgeEngine::Vertex vertex{};
+            ForgeEngine::Vertex vertex{};
             const aiVector3D& pos = source->mVertices[v];
             vertex.position = { pos.x, pos.y, pos.z };
             boundsMin.x = (std::min)(boundsMin.x, pos.x); boundsMin.y = (std::min)(boundsMin.y, pos.y); boundsMin.z = (std::min)(boundsMin.z, pos.z);
@@ -3554,10 +3752,10 @@ bool DX12ForgeEditorUI::InstantiateObj(DX12ForgeEngine& engine, const std::files
     }
 
     engine.CreateMesh(*mesh, vertices, indices);
-    DX12ForgeEngine::Mesh* meshPtr = mesh.get();
+    ForgeEngine::Mesh* meshPtr = mesh.get();
     engine.m_importedMeshes.push_back(std::move(mesh));
 
-    DX12ForgeEngine::GameObject object;
+    ForgeEngine::GameObject object;
     object.name = path.stem().string();
     object.mesh = meshPtr;
     object.importedModelPath = RelativeAssetPath(path);
@@ -3581,11 +3779,11 @@ bool DX12ForgeEditorUI::InstantiateObj(DX12ForgeEngine& engine, const std::files
     return true;
 }
 
-void DX12ForgeEditorUI::HandleDroppedFiles(HDROP drop)
+void ForgeEditorUI::HandleDroppedFiles(HDROP drop)
 {
     if (!drop) return;
     if (!m_engine) { DragFinish(drop); return; }
-    DX12ForgeEngine& engine = *m_engine;
+    ForgeEngine& engine = *m_engine;
     const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
     for (UINT i = 0; i < count; ++i) {
         std::array<wchar_t, 32768> buffer{};
@@ -3616,13 +3814,13 @@ void DX12ForgeEditorUI::HandleDroppedFiles(HDROP drop)
     DragFinish(drop);
 }
 
-void DX12ForgeEditorUI::DuplicateSelected(DX12ForgeEngine& engine)
+void ForgeEditorUI::DuplicateSelected(ForgeEngine& engine)
 {
     if (engine.m_selectedObject < 0 || engine.m_selectedObject >= static_cast<int>(engine.m_objects.size())) return;
     const auto& source = engine.m_objects[static_cast<size_t>(engine.m_selectedObject)];
     // Copy every component field (transform, tag/layer, collider, rigidbody,
     // camera, light, materials and scripts), then replace the GPU constant buffers.
-    auto duplicate = std::make_unique<DX12ForgeEngine::GameObject>(source);
+    auto duplicate = std::make_unique<ForgeEngine::GameObject>(source);
     duplicate->name = source.name + " Copy";
     duplicate->position = DirectX::XMFLOAT3{ source.position.x + 1.0f, source.position.y, source.position.z + 0.5f };
     duplicate->isDragPreview = false;
@@ -3637,7 +3835,7 @@ void DX12ForgeEditorUI::DuplicateSelected(DX12ForgeEngine& engine)
     Log("Selected object duplicated.");
 }
 
-void DX12ForgeEditorUI::DeleteSelected(DX12ForgeEngine& engine)
+void ForgeEditorUI::DeleteSelected(ForgeEngine& engine)
 {
     const int index = engine.m_selectedObject;
     if (index < 0 || index >= static_cast<int>(engine.m_objects.size())) return;
@@ -3661,7 +3859,7 @@ void DX12ForgeEditorUI::DeleteSelected(DX12ForgeEngine& engine)
     Log("Selected object deleted.");
 }
 
-void DX12ForgeEditorUI::NewScene(DX12ForgeEngine& engine)
+void ForgeEditorUI::NewScene(ForgeEngine& engine)
 {
     engine.WaitForGpu();
     engine.m_viewportCameraObjectIndex = -1;
@@ -3672,7 +3870,7 @@ void DX12ForgeEditorUI::NewScene(DX12ForgeEngine& engine)
     Log("New empty scene created.");
 }
 
-bool DX12ForgeEditorUI::SaveScene(DX12ForgeEngine& engine, const std::filesystem::path& path)
+bool ForgeEditorUI::SaveScene(ForgeEngine& engine, const std::filesystem::path& path)
 {
     if (path.empty()) return false;
     std::error_code ec;
@@ -3683,7 +3881,7 @@ bool DX12ForgeEditorUI::SaveScene(DX12ForgeEngine& engine, const std::filesystem
         Log("ERROR: Could not save scene: " + path.string());
         return false;
     }
-    out << "DX12FORGE_SCENE 7\n";
+    out << "FORGEENGINE_SCENE 11\n";
     out << "OBJECT_COUNT " << engine.m_objects.size() << '\n';
     for (const auto& object : engine.m_objects)
     {
@@ -3721,6 +3919,34 @@ bool DX12ForgeEditorUI::SaveScene(DX12ForgeEngine& engine, const std::filesystem
             << object.colliderSize.x << ' ' << object.colliderSize.y << ' ' << object.colliderSize.z << ' '
             << object.isTrigger << ' ' << object.hasRigidbody << ' ' << object.rigidbodyMass << ' '
             << object.rigidbodyUseGravity << ' ' << object.rigidbodyIsKinematic << ' ';
+        out << std::quoted(object.emissiveTexturePath) << ' '
+            << object.emissiveColor.x << ' ' << object.emissiveColor.y << ' ' << object.emissiveColor.z << ' '
+            << object.emissiveIntensity << ' ' << object.normalMapScale << ' ' << object.occlusionStrength << ' '
+            << object.doubleSided << ' ';
+        out << object.cameraOrthographic << ' ' << object.cameraOrthographicSize << ' '
+            << object.cameraDepth << ' '
+            << object.cameraBackgroundColor.x << ' ' << object.cameraBackgroundColor.y << ' '
+            << object.cameraBackgroundColor.z << ' ' << object.cameraBackgroundColor.w << ' '
+            << object.cameraDrawSkybox << ' ' << object.cameraDrawGizmos << ' '
+            << object.cameraCullingMask << ' '
+            << object.hasMaterial << ' '
+            << object.colliderCenter.x << ' ' << object.colliderCenter.y << ' ' << object.colliderCenter.z << ' '
+            << object.hasCharacterController << ' ' << object.characterHeight << ' ' << object.characterRadius << ' '
+            << object.characterSlopeLimit << ' ' << object.characterStepOffset << ' ' << object.characterSkinWidth << ' '
+            << object.characterGravity << ' ' << object.characterSpeed << ' ' << object.characterJumpHeight << ' '
+            << object.hasParticleSystem << ' ' << object.particleMaxCount << ' ' << object.particleLifetime << ' '
+            << object.particleStartSpeed << ' ' << object.particleStartSize << ' ' << object.particleGravity << ' '
+            << object.particleEmissionRate << ' '
+            << object.particleStartColor.x << ' ' << object.particleStartColor.y << ' ' << object.particleStartColor.z << ' '
+            << object.particleDirection.x << ' ' << object.particleDirection.y << ' ' << object.particleDirection.z << ' '
+            << object.particleSpread << ' ' << object.particleLooping << ' '
+            << object.hasAnimator << ' ' << std::quoted(object.animatorClipName) << ' '
+            << object.animatorSpeed << ' ' << object.animatorLoop << ' ' << object.animatorPlaying << ' '
+            << object.hasAudioListener << ' ' << object.audioListenerVolume << ' '
+            << object.audioSourceVolume << ' ' << object.audioSourcePitch << ' '
+            << object.audioSourceMinDistance << ' ' << object.audioSourceMaxDistance << ' '
+            << object.audioSourceLoop << ' ' << object.audioSourcePlayOnAwake << ' '
+            << std::quoted(object.audioSourceClipPath) << ' ' << object.audioSourceSpatial << ' ';
         out << '\n';
     }
     if (!out.good())
@@ -3734,7 +3960,7 @@ bool DX12ForgeEditorUI::SaveScene(DX12ForgeEngine& engine, const std::filesystem
     return true;
 }
 
-bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem::path& path)
+bool ForgeEditorUI::LoadScene(ForgeEngine& engine, const std::filesystem::path& path)
 {
     std::error_code ec;
     std::ifstream in(path, std::ios::binary);
@@ -3747,7 +3973,9 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
     int version = 0;
     size_t objectCount = 0;
     in >> signature >> version;
-    if (!in || signature != "DX12FORGE_SCENE" || (version < 1 || version > 7))
+    // Accept both the legacy DX12FORGE_SCENE tag and the current FORGEENGINE_SCENE tag
+    // so scenes authored before the engine rename keep loading.
+    if (!in || (signature != "FORGEENGINE_SCENE" && signature != "DX12FORGE_SCENE") || (version < 1 || version > 11))
     {
         Log("ERROR: Invalid or unsupported scene file.");
         return false;
@@ -3759,11 +3987,11 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
         return false;
     }
 
-    std::vector<DX12ForgeEngine::GameObject> loaded;
+    std::vector<ForgeEngine::GameObject> loaded;
     loaded.reserve(objectCount);
     for (size_t i = 0; i < objectCount; ++i)
     {
-        DX12ForgeEngine::GameObject object;
+        ForgeEngine::GameObject object;
         int meshKind = 0;
         in >> token >> std::quoted(object.name) >> meshKind
             >> object.position.x >> object.position.y >> object.position.z
@@ -3783,7 +4011,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                 >> object.lightIntensity >> object.lightRange
                 >> object.lightInnerAngle >> object.lightOuterAngle;
             object.lightType = (lightKind >= 0 && lightKind <= 3)
-                ? static_cast<DX12ForgeEngine::LightType>(lightKind) : DX12ForgeEngine::LightType::None;
+                ? static_cast<ForgeEngine::LightType>(lightKind) : ForgeEngine::LightType::None;
             if (version >= 3)
             {
                 if (version >= 4)
@@ -3798,7 +4026,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                 }
                 for (size_t scriptIndex = 0; scriptIndex < scriptCount; ++scriptIndex)
                 {
-                    DX12ForgeEngine::ScriptComponentData script;
+                    ForgeEngine::ScriptComponentData script;
                     in >> std::quoted(script.className) >> std::quoted(script.sourceFile) >> script.enabled;
                     if (!in)
                     {
@@ -3835,6 +4063,55 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                         object.colliderSize.z = std::max(0.01f, object.colliderSize.z);
                         object.rigidbodyMass = std::max(0.01f, object.rigidbodyMass);
                     }
+                    if (version >= 8)
+                    {
+                        in >> std::quoted(object.emissiveTexturePath)
+                           >> object.emissiveColor.x >> object.emissiveColor.y >> object.emissiveColor.z
+                           >> object.emissiveIntensity >> object.normalMapScale >> object.occlusionStrength
+                           >> object.doubleSided;
+                        object.emissiveIntensity = std::clamp(object.emissiveIntensity, 0.0f, 64.0f);
+                        object.normalMapScale = std::clamp(object.normalMapScale, 0.0f, 8.0f);
+                        object.occlusionStrength = std::clamp(object.occlusionStrength, 0.0f, 1.0f);
+                    }
+                    if (version >= 9)
+                    {
+                        in >> object.cameraOrthographic >> object.cameraOrthographicSize
+                           >> object.cameraDepth
+                           >> object.cameraBackgroundColor.x >> object.cameraBackgroundColor.y
+                           >> object.cameraBackgroundColor.z >> object.cameraBackgroundColor.w
+                           >> object.cameraDrawSkybox >> object.cameraDrawGizmos
+                           >> object.cameraCullingMask;
+                        object.cameraOrthographicSize = std::clamp(object.cameraOrthographicSize, 0.1f, 500.0f);
+                        object.cameraDepth = std::clamp(object.cameraDepth, -100, 100);
+                        in >> object.hasMaterial;
+                    }
+                    if (version >= 10)
+                        in >> object.colliderCenter.x >> object.colliderCenter.y >> object.colliderCenter.z;
+                    if (version >= 11)
+                    {
+                        in >> object.hasCharacterController >> object.characterHeight >> object.characterRadius
+                           >> object.characterSlopeLimit >> object.characterStepOffset >> object.characterSkinWidth
+                           >> object.characterGravity >> object.characterSpeed >> object.characterJumpHeight
+                           >> object.hasParticleSystem >> object.particleMaxCount >> object.particleLifetime
+                           >> object.particleStartSpeed >> object.particleStartSize >> object.particleGravity
+                           >> object.particleEmissionRate
+                           >> object.particleStartColor.x >> object.particleStartColor.y >> object.particleStartColor.z
+                           >> object.particleDirection.x >> object.particleDirection.y >> object.particleDirection.z
+                           >> object.particleSpread >> object.particleLooping
+                           >> object.hasAnimator >> std::quoted(object.animatorClipName)
+                           >> object.animatorSpeed >> object.animatorLoop >> object.animatorPlaying
+                           >> object.hasAudioListener >> object.audioListenerVolume
+                           >> object.audioSourceVolume >> object.audioSourcePitch
+                           >> object.audioSourceMinDistance >> object.audioSourceMaxDistance
+                           >> object.audioSourceLoop >> object.audioSourcePlayOnAwake
+                           >> std::quoted(object.audioSourceClipPath) >> object.audioSourceSpatial;
+                        object.characterHeight = std::clamp(object.characterHeight, 0.2f, 20.0f);
+                        object.characterRadius = std::clamp(object.characterRadius, 0.05f, 10.0f);
+                        object.particleMaxCount = std::clamp(object.particleMaxCount, 1, 100000);
+                        object.particleLifetime = std::clamp(object.particleLifetime, 0.05f, 120.0f);
+                        object.particleStartSize = std::max(0.001f, object.particleStartSize);
+                        object.animatorSpeed = std::clamp(object.animatorSpeed, -10.0f, 10.0f);
+                    }
                 }
             }
         }
@@ -3863,7 +4140,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                 const aiScene* modelScene = importer.ReadFile(modelPath.string(), aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                     aiProcess_JoinIdenticalVertices | aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
                     aiProcess_ValidateDataStructure | aiProcess_PreTransformVertices | aiProcess_FlipUVs | aiProcess_FixInfacingNormals);
-                std::vector<DX12ForgeEngine::Vertex> modelVertices;
+                std::vector<ForgeEngine::Vertex> modelVertices;
                 std::vector<std::uint32_t> modelIndices;
                 if (modelScene && modelScene->HasMeshes())
                 {
@@ -3874,7 +4151,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                         const auto base=static_cast<std::uint32_t>(modelVertices.size());
                         for (unsigned int vi=0; vi<src->mNumVertices; ++vi)
                         {
-                            DX12ForgeEngine::Vertex v{}; const auto& pos=src->mVertices[vi]; v.position={pos.x,pos.y,pos.z};
+                            ForgeEngine::Vertex v{}; const auto& pos=src->mVertices[vi]; v.position={pos.x,pos.y,pos.z};
                             lo.x=(std::min)(lo.x,pos.x);lo.y=(std::min)(lo.y,pos.y);lo.z=(std::min)(lo.z,pos.z);
                             hi.x=(std::max)(hi.x,pos.x);hi.y=(std::max)(hi.y,pos.y);hi.z=(std::max)(hi.z,pos.z);
                             if(src->HasNormals()) v.normal=Normalize3({src->mNormals[vi].x,src->mNormals[vi].y,src->mNormals[vi].z}); else v.normal={0,1,0};
@@ -3888,7 +4165,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                         const XMFLOAT3 center{(lo.x+hi.x)*0.5f,(lo.y+hi.y)*0.5f,(lo.z+hi.z)*0.5f};
                         const float largest=(std::max)({hi.x-lo.x,hi.y-lo.y,hi.z-lo.z});
                         if(largest>1.0e-5f) for(auto& v:modelVertices) { v.position.x=(v.position.x-center.x)*2.0f/largest; v.position.y=(v.position.y-center.y)*2.0f/largest; v.position.z=(v.position.z-center.z)*2.0f/largest; }
-                        auto mesh=std::make_unique<DX12ForgeEngine::Mesh>(); engine.CreateMesh(*mesh,modelVertices,modelIndices);
+                        auto mesh=std::make_unique<ForgeEngine::Mesh>(); engine.CreateMesh(*mesh,modelVertices,modelIndices);
                         object.localBoundsRadius=1.75f; object.mesh=mesh.get(); engine.m_importedMeshes.push_back(std::move(mesh));
                     }
                 }
@@ -3900,14 +4177,14 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
         {
             // Reconstruct a flat editable terrain grid on older scenes. v5 stores heights below.
             constexpr int side = 65;
-            std::vector<DX12ForgeEngine::Vertex> terrainVertices;
+            std::vector<ForgeEngine::Vertex> terrainVertices;
             std::vector<std::uint32_t> terrainIndices;
             terrainVertices.reserve(side * side);
             const auto savedHeights = std::move(object.terrainVertices);
             const bool hasSavedHeights = savedHeights.size() == static_cast<size_t>(side * side);
             for (int z = 0; z < side; ++z) for (int x = 0; x < side; ++x)
             {
-                DX12ForgeEngine::Vertex v{};
+                ForgeEngine::Vertex v{};
                 const size_t vertexIndex = static_cast<size_t>(z * side + x);
                 const float savedHeight = hasSavedHeights ? savedHeights[vertexIndex].position.y : 0.0f;
                 v.position = { (static_cast<float>(x) / 64.0f - 0.5f) * 32.0f, savedHeight,
@@ -3921,7 +4198,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
                 const std::uint32_t a = static_cast<std::uint32_t>(z * side + x), b = a + 1, c = a + side, d = c + 1;
                 terrainIndices.insert(terrainIndices.end(), { a, c, b, b, c, d });
             }
-            auto mesh = std::make_unique<DX12ForgeEngine::Mesh>();
+            auto mesh = std::make_unique<ForgeEngine::Mesh>();
             engine.CreateMesh(*mesh, terrainVertices, terrainIndices);
             object.mesh = mesh.get();
             object.terrainVertices = std::move(terrainVertices);
@@ -3933,7 +4210,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
             object.mesh = &engine.m_primitiveMeshes[2];
             object.castShadows = false;
         }
-        if (object.lightType != DX12ForgeEngine::LightType::None)
+        if (object.lightType != ForgeEngine::LightType::None)
         {
             object.castShadows = false;
             object.lightIntensity = std::clamp(object.lightIntensity, 0.0f, 180.0f);
@@ -3981,7 +4258,7 @@ bool DX12ForgeEditorUI::LoadScene(DX12ForgeEngine& engine, const std::filesystem
     return true;
 }
 
-bool DX12ForgeEditorUI::SaveSceneDialog(DX12ForgeEngine& engine)
+bool ForgeEditorUI::SaveSceneDialog(ForgeEngine& engine)
 {
     std::array<wchar_t, 32768> fileName{};
     const auto initial = m_currentScenePath.empty() ? m_assetsRoot / L"Scenes" / L"Untitled.forgeScene" : m_currentScenePath;
@@ -4002,7 +4279,7 @@ bool DX12ForgeEditorUI::SaveSceneDialog(DX12ForgeEngine& engine)
     return SaveScene(engine, std::filesystem::path(fileName.data()));
 }
 
-bool DX12ForgeEditorUI::OpenSceneDialog(DX12ForgeEngine& engine)
+bool ForgeEditorUI::OpenSceneDialog(ForgeEngine& engine)
 {
     std::array<wchar_t, 32768> fileName{};
     static const wchar_t filter[] = L"Forge Scene (*.forgeScene)\0*.forgeScene\0All files (*.*)\0*.*\0\0";
@@ -4019,7 +4296,7 @@ bool DX12ForgeEditorUI::OpenSceneDialog(DX12ForgeEngine& engine)
     return LoadScene(engine, std::filesystem::path(fileName.data()));
 }
 
-void DX12ForgeEditorUI::ImportAssetDialog()
+void ForgeEditorUI::ImportAssetDialog()
 {
     std::array<wchar_t, 32768> fileName{};
     static const wchar_t filter[] = L"Supported assets (*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.tga;*.webp;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl;*.ply;*.3ds;*.mp4;*.mov;*.avi;*.mkv;*.webm;*.wmv;*.m4v;*.mp3;*.wav;*.ogg;*.forgeScene)\0*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.tga;*.webp;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl;*.ply;*.3ds;*.mp4;*.mov;*.avi;*.mkv;*.webm;*.wmv;*.m4v;*.mp3;*.wav;*.ogg;*.forgeScene\0All files (*.*)\0*.*\0\0";
@@ -4039,7 +4316,7 @@ void DX12ForgeEditorUI::ImportAssetDialog()
     }
 }
 
-std::filesystem::path DX12ForgeEditorUI::CategoryForExtension(const std::filesystem::path& path) const
+std::filesystem::path ForgeEditorUI::CategoryForExtension(const std::filesystem::path& path) const
 {
     const std::wstring ext = Lower(path.extension().wstring());
     if (IsImageExtension(path)) return L"Textures";
@@ -4052,7 +4329,7 @@ std::filesystem::path DX12ForgeEditorUI::CategoryForExtension(const std::filesys
     return L"Misc";
 }
 
-std::filesystem::path DX12ForgeEditorUI::ImportFile(const std::filesystem::path& source, const std::wstring& forcedCategory)
+std::filesystem::path ForgeEditorUI::ImportFile(const std::filesystem::path& source, const std::wstring& forcedCategory)
 {
     if (source.empty() || !std::filesystem::exists(source))
     {
@@ -4104,7 +4381,7 @@ std::filesystem::path DX12ForgeEditorUI::ImportFile(const std::filesystem::path&
     return destination;
 }
 
-std::string DX12ForgeEditorUI::RelativeAssetPath(const std::filesystem::path& path) const
+std::string ForgeEditorUI::RelativeAssetPath(const std::filesystem::path& path) const
 {
     if (path.empty()) return {};
     std::error_code ec;
@@ -4112,13 +4389,13 @@ std::string DX12ForgeEditorUI::RelativeAssetPath(const std::filesystem::path& pa
     return (ec ? path : relative).generic_string();
 }
 
-std::filesystem::path DX12ForgeEditorUI::ResolveAssetPath(const std::string& relativePath) const
+std::filesystem::path ForgeEditorUI::ResolveAssetPath(const std::string& relativePath) const
 {
     if (relativePath.empty()) return {};
     return (m_projectRoot / std::filesystem::path(relativePath)).lexically_normal();
 }
 
-void DX12ForgeEditorUI::BrowseTexture(DX12ForgeEngine& engine, TextureSlot slot)
+void ForgeEditorUI::BrowseTexture(ForgeEngine& engine, TextureSlot slot)
 {
     if (engine.m_selectedObject < 0 || engine.m_selectedObject >= static_cast<int>(engine.m_objects.size()))
     {
@@ -4145,11 +4422,12 @@ void DX12ForgeEditorUI::BrowseTexture(DX12ForgeEngine& engine, TextureSlot slot)
     case TextureSlot::Normal: object.normalTexturePath = relative; break;
     case TextureSlot::MetallicRoughness: object.metallicRoughnessTexturePath = relative; break;
     case TextureSlot::AmbientOcclusion: object.aoTexturePath = relative; break;
+    case TextureSlot::Emissive: object.emissiveTexturePath = relative; break;
     }
     Log("Texture reference assigned: " + relative);
 }
 
-void DX12ForgeEditorUI::AssignSelectedAsset(DX12ForgeEngine& engine, TextureSlot slot)
+void ForgeEditorUI::AssignSelectedAsset(ForgeEngine& engine, TextureSlot slot)
 {
     if (engine.m_selectedObject < 0 || engine.m_selectedObject >= static_cast<int>(engine.m_objects.size()) || m_selectedAssetPath.empty()) return;
     const auto path = m_selectedAssetPath;
@@ -4166,17 +4444,18 @@ void DX12ForgeEditorUI::AssignSelectedAsset(DX12ForgeEngine& engine, TextureSlot
     case TextureSlot::Normal: object.normalTexturePath = relative; break;
     case TextureSlot::MetallicRoughness: object.metallicRoughnessTexturePath = relative; break;
     case TextureSlot::AmbientOcclusion: object.aoTexturePath = relative; break;
+    case TextureSlot::Emissive: object.emissiveTexturePath = relative; break;
     }
     Log("Texture reference assigned: " + relative);
 }
 
-void DX12ForgeEditorUI::Log(const std::string& message)
+void ForgeEditorUI::Log(const std::string& message)
 {
     m_logs.push_back(message);
     if (m_logs.size() > 800) m_logs.erase(m_logs.begin(), m_logs.begin() + 100);
 }
 
-void DX12ForgeEditorUI::ResetDockLayout()
+void ForgeEditorUI::ResetDockLayout()
 {
     // Defer docking tree destruction until Draw() finishes the menu and reaches
     // EnsureDefaultDockLayout(). Removing the tree inside BeginMenu() can leave
@@ -4185,17 +4464,17 @@ void DX12ForgeEditorUI::ResetDockLayout()
     m_forceDefaultDockLayout = true;
 }
 
-void DX12ForgeEditorUI::RenderDrawData(DX12ForgeEngine& engine)
+void ForgeEditorUI::RenderDrawData(ForgeEngine& engine)
 {
     if (!m_dx12Initialized || !m_contextInitialized || !ImGui::GetCurrentContext() || !ImGui::GetDrawData())
         return;
-    if (engine.m_frameIndex >= DX12ForgeEngine::FrameCount ||
+    if (engine.m_frameIndex >= ForgeEngine::FrameCount ||
         !engine.m_commandList || !engine.m_renderTargets[engine.m_frameIndex] || !m_srvHeap)
     {
-        OutputDebugStringA("DX12 Forge: skipped ImGui draw because a frame resource is unavailable.\n");
+        OutputDebugStringA("Forge Engine: skipped ImGui draw because a frame resource is unavailable.\n");
         return;
     }
-    D3D12_RESOURCE_BARRIER toRenderTarget = DX12ForgeEngine::TransitionBarrier(
+    D3D12_RESOURCE_BARRIER toRenderTarget = ForgeEngine::TransitionBarrier(
         engine.m_renderTargets[engine.m_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     engine.m_commandList->ResourceBarrier(1, &toRenderTarget);
 
@@ -4208,12 +4487,12 @@ void DX12ForgeEditorUI::RenderDrawData(DX12ForgeEngine& engine)
     engine.m_commandList->SetDescriptorHeaps(1, heaps);
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), engine.m_commandList.Get());
 
-    D3D12_RESOURCE_BARRIER toPresent = DX12ForgeEngine::TransitionBarrier(
+    D3D12_RESOURCE_BARRIER toPresent = ForgeEngine::TransitionBarrier(
         engine.m_renderTargets[engine.m_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     engine.m_commandList->ResourceBarrier(1, &toPresent);
 }
 
-bool DX12ForgeEditorUI::CompileScripts(bool logSuccess)
+bool ForgeEditorUI::CompileScripts(bool logSuccess)
 {
     if (m_scriptBuildInProgress)
     {
@@ -4236,7 +4515,7 @@ bool DX12ForgeEditorUI::CompileScripts(bool logSuccess)
     return success;
 }
 
-void DX12ForgeEditorUI::StartPlayMode(DX12ForgeEngine& engine)
+void ForgeEditorUI::StartPlayMode(ForgeEngine& engine)
 {
     if (m_playPreview) return;
     // Exported games ship precompiled DLLs; invoking dotnet here would be slow and useless.
@@ -4280,7 +4559,7 @@ void DX12ForgeEditorUI::StartPlayMode(DX12ForgeEngine& engine)
     Log("▶ Play mode started. MonoBehaviour.Start/Update/LateUpdate are active.");
 }
 
-void DX12ForgeEditorUI::StopPlayMode(DX12ForgeEngine& engine)
+void ForgeEditorUI::StopPlayMode(ForgeEngine& engine)
 {
     if (m_scriptRuntime) m_scriptRuntime->Stop(&m_logs);
     m_playPreview = false;
@@ -4335,22 +4614,60 @@ namespace
         return true;
     }
 
+    // Recursively copies files but drops anything that is part of the engine's own
+    // project layout (Bin, source tree, projects registry). This is what keeps an
+    // exported game from containing a second copy of the engine.
+    bool CopyGameAssets(const std::filesystem::path& source, const std::filesystem::path& destination,
+        std::error_code& ec)
+    {
+        std::filesystem::create_directories(destination, ec);
+        if (ec) return false;
+        static const std::wstring skippedDirectories[] = {
+            L"obj", L"bin", L".vs", L"Logs", L"Intermediate", L"Binaries", L"Saved", L"Build",
+            L"Exports", L"Scripting", L"Plugins"
+        };
+        for (std::filesystem::directory_iterator it(source, ec), end; !ec && it != end; it.increment(ec))
+        {
+            const auto name = it->path().filename();
+            std::error_code kindEc;
+            if (it->is_directory(kindEc))
+            {
+                bool skip = false;
+                for (const auto& skipped : skippedDirectories) if (name == skipped) { skip = true; break; }
+                if (skip) continue;
+                if (!CopyGameAssets(it->path(), destination / name, ec)) return false;
+            }
+            else
+            {
+                // Never ship engine source or the editor's own project file.
+                if (name == L"CMakeLists.txt" || name == L"ForgeEngine.project") continue;
+                const auto ext = Lower(it->path().extension().wstring());
+                if (ext == L".cpp" || ext == L".h" || ext == L".hpp" || ext == L".cs" || ext == L".csproj")
+                    continue;
+                std::filesystem::copy_file(it->path(), destination / name,
+                    std::filesystem::copy_options::overwrite_existing, ec);
+                if (ec) return false;
+            }
+        }
+        return true;
+    }
+
     std::wstring SanitizeFileName(std::wstring value)
     {
         const size_t first = value.find_first_not_of(L" \t.");
         const size_t last = value.find_last_not_of(L" \t.");
-        if (first == std::wstring::npos) return L"DX12ForgeGame";
+        if (first == std::wstring::npos) return L"ForgeGame";
         value = value.substr(first, last - first + 1);
         for (wchar_t& ch : value)
         {
             if (ch < 32 || ch == L'<' || ch == L'>' || ch == L':' || ch == L'"' ||
                 ch == L'/' || ch == L'\\' || ch == L'|' || ch == L'?' || ch == L'*') ch = L'_';
         }
-        return value.empty() ? std::wstring(L"DX12ForgeGame") : value;
+        return value.empty() ? std::wstring(L"ForgeGame") : value;
     }
 }
 
-void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
+void ForgeEditorUI::ExportGame(ForgeEngine& engine)
 {
     if (m_projectRoot.empty() || m_sourceRoot.empty())
     {
@@ -4358,7 +4675,7 @@ void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
         return;
     }
     std::wstring product = SanitizeFileName(std::filesystem::u8path(m_exportProductName).wstring());
-    const std::string productNameUtf8 = product.empty() ? "DX12ForgeGame" : std::filesystem::path(product).u8string();
+    const std::string productNameUtf8 = product.empty() ? "ForgeGame" : std::filesystem::path(product).u8string();
 
     std::error_code ec;
     std::filesystem::path outputRoot = std::filesystem::u8path(m_exportOutputDir);
@@ -4387,6 +4704,10 @@ void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
     }
     const std::filesystem::path engineExecutable(executableBuffer.data());
     const auto exeDirectory = engineExecutable.parent_path();
+    // Unity-style data folder: everything the game needs at runtime lives here, so the
+    // game folder only exposes the executable, the data folder and the readme.
+    const std::filesystem::path dataFolder = gameDir / (product + L"_Data");
+    std::filesystem::create_directories(dataFolder, ec);
     int copiedRuntimeFiles = 0;
     for (std::filesystem::directory_iterator it(exeDirectory, ec), end; !ec && it != end; it.increment(ec))
     {
@@ -4398,31 +4719,38 @@ void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
             std::filesystem::copy_file(it->path(), gameDir / (product + L".exe"),
                 std::filesystem::copy_options::overwrite_existing, ec);
         }
-        else if (ext == L".dll" || it->path().filename() == L"Shaders.hlsl")
+        else if (ext == L".dll")
         {
+            // Native runtime DLLs must stay next to the executable so Windows resolves them.
             std::filesystem::copy_file(it->path(), gameDir / it->path().filename(),
+                std::filesystem::copy_options::overwrite_existing, ec);
+        }
+        else if (it->path().filename() == L"Shaders.hlsl")
+        {
+            std::filesystem::copy_file(it->path(), dataFolder / L"Shaders.hlsl",
                 std::filesystem::copy_options::overwrite_existing, ec);
         }
         else continue;
         if (!ec) ++copiedRuntimeFiles;
     }
 
-    // 2) Rename the engine exe and copy the script host to the source-tree layout
-    //    that ForgeScriptRuntime::Start expects (<root>/Scripting/...).
+    // 2) The precompiled C# script host, laid out the way ForgeScriptRuntime::Start
+    //    expects it (<root>/Scripting/ForgeScriptHost/bin/Debug/net8.0).
     const auto hostBin = m_sourceRoot / L"Scripting" / L"ForgeScriptHost" / L"bin" / L"Debug" / L"net8.0";
     if (!std::filesystem::exists(hostBin, ec))
     {
         Log("ERROR: ForgeScriptHost is not built. Press Play once in the editor (or build the solution) before exporting.");
         return;
     }
-    if (!CopyTreeSkipping(hostBin, gameDir / L"Scripting" / L"ForgeScriptHost" / L"bin" / L"Debug" / L"net8.0", ec))
+    if (!CopyTreeSkipping(hostBin, dataFolder / L"Scripting" / L"ForgeScriptHost" / L"bin" / L"Debug" / L"net8.0", ec))
     {
         Log("ERROR: Could not copy the C# script host into the export.");
         return;
     }
 
-    // 3) The whole project: scripts, scenes, models, textures, audio and presets.
-    if (!CopyTreeSkipping(m_projectRoot, gameDir / L"Project", ec))
+    // 3) Game assets and configuration. CopyGameAssets skips the engine's own project
+    //    layout (source, Bin, Scripting, Exports) so the game never nests the engine.
+    if (!CopyGameAssets(m_projectRoot, dataFolder / L"Project", ec))
     {
         Log("ERROR: Could not copy the project files into the export.");
         return;
@@ -4439,13 +4767,16 @@ void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
         else Log("WARNING: Icon copy failed; the game will use the default icon.");
     }
 
-    // 5) forge_game.ini next to the exe switches the engine into standalone player mode.
+    // 5) forge_game.ini next to the exe switches the engine into standalone player mode
+    //    and points it at the <Product>_Data folder.
+    const std::string dataFolderRelative = productNameUtf8 + "_Data";
     const auto iniPath = gameDir / L"forge_game.ini";
     std::ofstream ini(iniPath, std::ios::binary | std::ios::trunc);
-    ini << "; DX12 Forge standalone game configuration\n";
+    ini << "; Forge Engine standalone game configuration\n";
     ini << "product=" << productNameUtf8 << "\n";
     ini << "company=" << m_exportCompanyName << "\n";
     ini << "creator=" << m_exportCreatorName << "\n";
+    ini << "dataFolder=" << dataFolderRelative << "\n";
     if (!iconIniValue.empty()) ini << "icon=" << iconIniValue << "\n";
     static const int resWidths[] = { 640, 1280, 1600, 1920, 2560 };
     static const int resHeights[] = { 480, 720, 900, 1080, 1440 };
@@ -4474,7 +4805,7 @@ void DX12ForgeEditorUI::ExportGame(DX12ForgeEngine& engine)
     (void)copiedRuntimeFiles;
 }
 
-void DX12ForgeEditorUI::DrawExportModal(DX12ForgeEngine& engine)
+void ForgeEditorUI::DrawExportModal(ForgeEngine& engine)
 {
     if (m_openExportModal)
     {
@@ -4558,7 +4889,7 @@ void DX12ForgeEditorUI::DrawExportModal(DX12ForgeEngine& engine)
     }
 }
 
-void DX12ForgeEditorUI::RequestCreateScript(int objectIndex)
+void ForgeEditorUI::RequestCreateScript(int objectIndex)
 {
     m_scriptCreateTargetIndex = objectIndex;
     std::snprintf(m_newScriptClassName, sizeof(m_newScriptClassName), "%s", "NewBehaviourScript");
@@ -4571,7 +4902,7 @@ void DX12ForgeEditorUI::RequestCreateScript(int objectIndex)
     m_openCreateScriptModal = true;
 }
 
-bool DX12ForgeEditorUI::CreateAndAttachScript(DX12ForgeEngine& engine)
+bool ForgeEditorUI::CreateAndAttachScript(ForgeEngine& engine)
 {
     if (m_scriptCreateTargetIndex < 0 || m_scriptCreateTargetIndex >= static_cast<int>(engine.m_objects.size()))
     {
@@ -4638,7 +4969,7 @@ bool DX12ForgeEditorUI::CreateAndAttachScript(DX12ForgeEngine& engine)
     return true;
 }
 
-std::filesystem::path DX12ForgeEditorUI::FindVisualStudioExecutable() const
+std::filesystem::path ForgeEditorUI::FindVisualStudioExecutable() const
 {
     const wchar_t* keyPaths[] = {
         L"SOFTWARE\\Microsoft\\VisualStudio\\SxS\\VS7",
@@ -4685,7 +5016,7 @@ std::filesystem::path DX12ForgeEditorUI::FindVisualStudioExecutable() const
     return {};
 }
 
-void DX12ForgeEditorUI::OpenScriptInVisualStudio(const std::filesystem::path& scriptFile)
+void ForgeEditorUI::OpenScriptInVisualStudio(const std::filesystem::path& scriptFile)
 {
     if (!std::filesystem::exists(scriptFile))
     {
@@ -4715,7 +5046,7 @@ void DX12ForgeEditorUI::OpenScriptInVisualStudio(const std::filesystem::path& sc
         Log("Opened script using the Windows .cs file association: " + scriptFile.filename().string());
 }
 
-std::string DX12ForgeEditorUI::CalculateScriptSourceSignature() const
+std::string ForgeEditorUI::CalculateScriptSourceSignature() const
 {
     const auto folder = m_projectRoot / L"Scripts";
     std::error_code ec;
@@ -4745,7 +5076,7 @@ std::string DX12ForgeEditorUI::CalculateScriptSourceSignature() const
     return signature;
 }
 
-void DX12ForgeEditorUI::PollScriptFileChanges(DX12ForgeEngine&)
+void ForgeEditorUI::PollScriptFileChanges(ForgeEngine&)
 {
     const auto now = std::chrono::steady_clock::now();
     if (m_lastScriptPollAt.time_since_epoch().count() != 0 &&
@@ -4788,7 +5119,7 @@ void DX12ForgeEditorUI::PollScriptFileChanges(DX12ForgeEngine&)
     }
 }
 
-void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
+void ForgeEditorUI::TickScripts(ForgeEngine& engine, float deltaSeconds)
 {
     if (!engine.m_standalonePlayer) PollScriptFileChanges(engine);
     if (!m_playPreview) return;
@@ -4897,7 +5228,7 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         state.position = { object.position.x, object.position.y, object.position.z };
         state.rotationDegrees = { object.rotation.x * RadToDeg, object.rotation.y * RadToDeg, object.rotation.z * RadToDeg };
         state.scale = { object.scale.x, object.scale.y, object.scale.z };
-        state.hasMeshRenderer = object.mesh != nullptr && object.lightType == DX12ForgeEngine::LightType::None;
+        state.hasMeshRenderer = object.mesh != nullptr && object.lightType == ForgeEngine::LightType::None;
         state.meshRendererEnabled = object.meshRendererEnabled;
         state.hasCollider = object.hasCollider;
         state.hasAudioSource = object.hasAudioSource;
@@ -4913,11 +5244,69 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         state.layer = object.layer;
         state.colliderType = object.colliderType;
         state.colliderSize = { object.colliderSize.x, object.colliderSize.y, object.colliderSize.z };
+        state.colliderCenter = { object.colliderCenter.x, object.colliderCenter.y, object.colliderCenter.z };
+        state.parentIndex = object.parentIndex;
+        state.hasCharacterController = object.hasCharacterController;
+        state.characterHeight = object.characterHeight;
+        state.characterRadius = object.characterRadius;
+        state.characterSlopeLimit = object.characterSlopeLimit;
+        state.characterStepOffset = object.characterStepOffset;
+        state.characterSkinWidth = object.characterSkinWidth;
+        state.characterGravity = object.characterGravity;
+        state.characterSpeed = object.characterSpeed;
+        state.characterJumpHeight = object.characterJumpHeight;
+        state.characterVelocity = { object.characterVelocity.x, object.characterVelocity.y, object.characterVelocity.z };
+        state.characterIsGrounded = object.characterIsGrounded;
+        state.hasParticleSystem = object.hasParticleSystem;
+        state.particleMaxCount = object.particleMaxCount;
+        state.particleLifetime = object.particleLifetime;
+        state.particleStartSpeed = object.particleStartSpeed;
+        state.particleStartSize = object.particleStartSize;
+        state.particleGravity = object.particleGravity;
+        state.particleEmissionRate = object.particleEmissionRate;
+        state.particleStartColor = { object.particleStartColor.x, object.particleStartColor.y, object.particleStartColor.z };
+        state.particleDirection = { object.particleDirection.x, object.particleDirection.y, object.particleDirection.z };
+        state.particleSpread = object.particleSpread;
+        state.particleLooping = object.particleLooping;
+        state.hasAnimator = object.hasAnimator;
+        state.animatorClipName = object.animatorClipName;
+        state.animatorSpeed = object.animatorSpeed;
+        state.animatorLoop = object.animatorLoop;
+        state.animatorPlaying = object.animatorPlaying;
+        state.animatorTime = object.animatorTime;
+        state.hasAudioListener = object.hasAudioListener;
+        state.audioListenerVolume = object.audioListenerVolume;
+        state.audioSourceVolume = object.audioSourceVolume;
+        state.audioSourcePitch = object.audioSourcePitch;
+        state.audioSourceMinDistance = object.audioSourceMinDistance;
+        state.audioSourceMaxDistance = object.audioSourceMaxDistance;
+        state.audioSourceLoop = object.audioSourceLoop;
+        state.audioSourcePlayOnAwake = object.audioSourcePlayOnAwake;
+        state.audioSourceClipPath = object.audioSourceClipPath;
+        state.audioSourceSpatial = object.audioSourceSpatial;
         state.isTrigger = object.isTrigger;
         state.hasRigidbody = object.hasRigidbody;
         state.mass = object.rigidbodyMass;
         state.useGravity = object.rigidbodyUseGravity;
         state.isKinematic = object.rigidbodyIsKinematic;
+        state.baseColor = { object.baseColor.x, object.baseColor.y, object.baseColor.z };
+        state.metallic = object.metallic;
+        state.roughness = object.roughness;
+        state.emissiveColor = { object.emissiveColor.x, object.emissiveColor.y, object.emissiveColor.z };
+        state.emissiveIntensity = object.emissiveIntensity;
+        state.normalMapScale = object.normalMapScale;
+        state.doubleSided = object.doubleSided;
+        state.cameraFieldOfView = object.cameraFieldOfView;
+        state.cameraNearClip = object.cameraNearClip;
+        state.cameraFarClip = object.cameraFarClip;
+        state.cameraOrthographic = object.cameraOrthographic;
+        state.cameraOrthographicSize = object.cameraOrthographicSize;
+        state.cameraDepth = object.cameraDepth;
+        state.cameraBackgroundColor = { object.cameraBackgroundColor.x, object.cameraBackgroundColor.y,
+            object.cameraBackgroundColor.z, object.cameraBackgroundColor.w };
+        state.cameraDrawSkybox = object.cameraDrawSkybox;
+        state.cameraDrawGizmos = object.cameraDrawGizmos;
+        state.cameraCullingMask = object.cameraCullingMask;
         for (const auto& script : object.scriptComponents)
             state.scripts.push_back({ script.className, script.enabled });
         states.push_back(std::move(state));
@@ -4950,12 +5339,71 @@ void DX12ForgeEditorUI::TickScripts(DX12ForgeEngine& engine, float deltaSeconds)
         object.layer = std::clamp(state.layer, 0, 31);
         object.colliderType = std::clamp(state.colliderType, 0, 2);
         object.colliderSize = { std::max(0.01f,state.colliderSize.x), std::max(0.01f,state.colliderSize.y), std::max(0.01f,state.colliderSize.z) };
+        object.colliderCenter = { state.colliderCenter.x, state.colliderCenter.y, state.colliderCenter.z };
+        if (state.parentIndex >= -1 && state.parentIndex < static_cast<int>(engine.m_objects.size()))
+            object.parentIndex = state.parentIndex;
+        object.hasCharacterController = state.hasCharacterController;
+        object.characterHeight = std::clamp(state.characterHeight, 0.2f, 20.0f);
+        object.characterRadius = std::clamp(state.characterRadius, 0.05f, 10.0f);
+        object.characterSlopeLimit = std::clamp(state.characterSlopeLimit, 0.0f, 89.0f);
+        object.characterStepOffset = std::clamp(state.characterStepOffset, 0.0f, 2.0f);
+        object.characterSkinWidth = std::clamp(state.characterSkinWidth, 0.0f, 0.5f);
+        object.characterGravity = state.characterGravity;
+        object.characterSpeed = std::max(0.0f, state.characterSpeed);
+        object.characterJumpHeight = std::max(0.0f, state.characterJumpHeight);
+        object.characterVelocity = { state.characterVelocity.x, state.characterVelocity.y, state.characterVelocity.z };
+        object.characterIsGrounded = state.characterIsGrounded;
+        object.hasParticleSystem = state.hasParticleSystem;
+        object.particleMaxCount = std::clamp(state.particleMaxCount, 1, 100000);
+        object.particleLifetime = std::clamp(state.particleLifetime, 0.05f, 120.0f);
+        object.particleStartSpeed = std::max(0.0f, state.particleStartSpeed);
+        object.particleStartSize = std::max(0.001f, state.particleStartSize);
+        object.particleGravity = state.particleGravity;
+        object.particleEmissionRate = std::max(0.0f, state.particleEmissionRate);
+        object.particleStartColor = { state.particleStartColor.x, state.particleStartColor.y, state.particleStartColor.z };
+        object.particleDirection = { state.particleDirection.x, state.particleDirection.y, state.particleDirection.z };
+        object.particleSpread = std::clamp(state.particleSpread, 0.0f, 180.0f);
+        object.particleLooping = state.particleLooping;
+        object.hasAnimator = state.hasAnimator;
+        object.animatorClipName = state.animatorClipName;
+        object.animatorSpeed = std::clamp(state.animatorSpeed, -10.0f, 10.0f);
+        object.animatorLoop = state.animatorLoop;
+        object.animatorPlaying = state.animatorPlaying;
+        object.animatorTime = std::max(0.0f, state.animatorTime);
+        object.hasAudioListener = state.hasAudioListener;
+        object.audioListenerVolume = std::clamp(state.audioListenerVolume, 0.0f, 4.0f);
+        object.audioSourceVolume = std::clamp(state.audioSourceVolume, 0.0f, 4.0f);
+        object.audioSourcePitch = std::clamp(state.audioSourcePitch, 0.1f, 3.0f);
+        object.audioSourceMinDistance = std::max(0.01f, state.audioSourceMinDistance);
+        object.audioSourceMaxDistance = std::max(object.audioSourceMinDistance, state.audioSourceMaxDistance);
+        object.audioSourceLoop = state.audioSourceLoop;
+        object.audioSourcePlayOnAwake = state.audioSourcePlayOnAwake;
+        object.audioSourceClipPath = state.audioSourceClipPath;
+        object.audioSourceSpatial = state.audioSourceSpatial;
         object.isTrigger = state.isTrigger;
         object.hasCollider = state.hasCollider;
         object.hasRigidbody = state.hasRigidbody;
         object.rigidbodyMass = std::max(0.01f, state.mass);
         object.rigidbodyUseGravity = state.useGravity;
         object.rigidbodyIsKinematic = state.isKinematic;
+        object.baseColor = { state.baseColor.x, state.baseColor.y, state.baseColor.z, object.baseColor.w };
+        object.metallic = std::clamp(state.metallic, 0.0f, 1.0f);
+        object.roughness = std::clamp(state.roughness, 0.045f, 1.0f);
+        object.emissiveColor = { state.emissiveColor.x, state.emissiveColor.y, state.emissiveColor.z };
+        object.emissiveIntensity = std::clamp(state.emissiveIntensity, 0.0f, 64.0f);
+        object.normalMapScale = std::clamp(state.normalMapScale, 0.0f, 8.0f);
+        object.doubleSided = state.doubleSided;
+        object.cameraFieldOfView = std::clamp(state.cameraFieldOfView, 1.0f, 179.0f);
+        object.cameraNearClip = std::max(0.001f, state.cameraNearClip);
+        object.cameraFarClip = std::max(object.cameraNearClip + 0.01f, state.cameraFarClip);
+        object.cameraOrthographic = state.cameraOrthographic;
+        object.cameraOrthographicSize = std::clamp(state.cameraOrthographicSize, 0.01f, 500.0f);
+        object.cameraDepth = std::clamp(state.cameraDepth, -100, 100);
+        object.cameraBackgroundColor = { state.cameraBackgroundColor.x, state.cameraBackgroundColor.y,
+            state.cameraBackgroundColor.z, state.cameraBackgroundColor.w };
+        object.cameraDrawSkybox = state.cameraDrawSkybox;
+        object.cameraDrawGizmos = state.cameraDrawGizmos;
+        object.cameraCullingMask = state.cameraCullingMask;
         for (const auto& scriptState : state.scripts)
         {
             for (auto& scriptComponent : object.scriptComponents)

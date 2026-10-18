@@ -133,7 +133,7 @@ bool ForgeScriptRuntime::RunDotnetBuild(const std::filesystem::path& dotnetPath,
 
 bool ForgeScriptRuntime::Build(const std::filesystem::path& sourceRoot,const std::filesystem::path& projectRoot,std::vector<std::string>& logs)
 {
-    const auto dotnet=FindDotnet();if(dotnet.empty()){logs.push_back("ERROR: .NET SDK not found. Install the .NET 8 SDK and restart DX12 Forge.");return false;}
+    const auto dotnet=FindDotnet();if(dotnet.empty()){logs.push_back("ERROR: .NET SDK not found. Install the .NET 8 SDK and restart Forge Engine.");return false;}
     const auto scriptsProject=projectRoot/L"Scripts"/L"ForgeGameScripts.csproj";
     const auto hostProject=sourceRoot/L"Scripting"/L"ForgeScriptHost"/L"ForgeScriptHost.csproj";
     if(!std::filesystem::exists(scriptsProject)){logs.push_back("ERROR: C# scripts project missing: "+scriptsProject.string());return false;}
@@ -259,7 +259,30 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
         <<o.lightColor.z<<'|'<<o.lightIntensity<<'|'<<o.lightRange<<'|'<<o.lightInnerAngle<<'|'<<o.lightOuterAngle<<'|'
         <<(o.hasCollider?1:0)<<'|'<<(o.hasAudioSource?1:0)<<'|'<<(o.hasCamera?1:0)<<'|'
         <<Base64Encode(o.tag)<<'|'<<o.layer<<'|'<<o.colliderType<<'|'<<o.colliderSize.x<<'|'<<o.colliderSize.y<<'|'<<o.colliderSize.z<<'|'
-        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'\n';
+        <<(o.isTrigger?1:0)<<'|'<<(o.hasRigidbody?1:0)<<'|'<<o.mass<<'|'<<(o.useGravity?1:0)<<'|'<<(o.isKinematic?1:0)<<'|'
+         <<o.baseColor.x<<'|'<<o.baseColor.y<<'|'<<o.baseColor.z<<'|'<<o.metallic<<'|'<<o.roughness<<'|'
+         <<o.emissiveColor.x<<'|'<<o.emissiveColor.y<<'|'<<o.emissiveColor.z<<'|'<<o.emissiveIntensity<<'|'
+         <<o.normalMapScale<<'|'<<(o.doubleSided?1:0)<<'|'
+         <<o.cameraFieldOfView<<'|'<<o.cameraNearClip<<'|'<<o.cameraFarClip<<'|'<<(o.cameraOrthographic?1:0)<<'|'
+         <<o.cameraOrthographicSize<<'|'<<o.cameraDepth<<'|'
+         <<o.cameraBackgroundColor.x<<'|'<<o.cameraBackgroundColor.y<<'|'<<o.cameraBackgroundColor.z<<'|'<<o.cameraBackgroundColor.w<<'|'
+         <<(o.cameraDrawSkybox?1:0)<<'|'<<(o.cameraDrawGizmos?1:0)<<'|'<<o.cameraCullingMask<<'|'
+         <<o.colliderCenter.x<<'|'<<o.colliderCenter.y<<'|'<<o.colliderCenter.z<<'|'<<o.parentIndex<<'|'
+         <<(o.hasCharacterController?1:0)<<'|'<<o.characterHeight<<'|'<<o.characterRadius<<'|'<<o.characterSlopeLimit<<'|'
+         <<o.characterStepOffset<<'|'<<o.characterSkinWidth<<'|'<<o.characterGravity<<'|'<<o.characterSpeed<<'|'
+         <<o.characterJumpHeight<<'|'<<o.characterVelocity.x<<'|'<<o.characterVelocity.y<<'|'<<o.characterVelocity.z<<'|'
+         <<(o.characterIsGrounded?1:0)<<'|'
+         <<(o.hasParticleSystem?1:0)<<'|'<<o.particleMaxCount<<'|'<<o.particleLifetime<<'|'<<o.particleStartSpeed<<'|'
+         <<o.particleStartSize<<'|'<<o.particleGravity<<'|'<<o.particleEmissionRate<<'|'
+         <<o.particleStartColor.x<<'|'<<o.particleStartColor.y<<'|'<<o.particleStartColor.z<<'|'
+         <<o.particleDirection.x<<'|'<<o.particleDirection.y<<'|'<<o.particleDirection.z<<'|'
+         <<o.particleSpread<<'|'<<(o.particleLooping?1:0)<<'|'
+         <<(o.hasAnimator?1:0)<<'|'<<Base64Encode(o.animatorClipName)<<'|'<<o.animatorSpeed<<'|'
+         <<(o.animatorLoop?1:0)<<'|'<<(o.animatorPlaying?1:0)<<'|'<<o.animatorTime<<'|'
+         <<(o.hasAudioListener?1:0)<<'|'<<o.audioListenerVolume<<'|'
+         <<o.audioSourceVolume<<'|'<<o.audioSourcePitch<<'|'<<o.audioSourceMinDistance<<'|'<<o.audioSourceMaxDistance<<'|'
+         <<(o.audioSourceLoop?1:0)<<'|'<<(o.audioSourcePlayOnAwake?1:0)<<'|'
+         <<Base64Encode(o.audioSourceClipPath)<<'|'<<(o.audioSourceSpatial?1:0)<<'\n';
         for(const auto& s:o.scripts)out<<"SCRIPT|"<<o.id<<'|'<<s.className<<'|'<<(s.enabled?1:0)<<'\n';}
     out<<"END\n";if(!SendText(out.str())){logs.push_back("ERROR: Lost connection to the C# script host.");Stop();return false;}
     bool gotEnd=false;const ULONGLONG deadline=GetTickCount64()+3000;std::map<int,ForgeScriptObjectState*> byId;for(auto& o:objects)byId[o.id]=&o;
@@ -299,6 +322,72 @@ bool ForgeScriptRuntime::Tick(float deltaSeconds,const ForgeScriptInputState& in
             if(p.size()>=31){o.colliderType=ToInt(p[22],o.colliderType);o.colliderSize={ToFloat(p[23],o.colliderSize.x),ToFloat(p[24],o.colliderSize.y),ToFloat(p[25],o.colliderSize.z)};
                 o.isTrigger=ToInt(p[26],o.isTrigger?1:0)!=0;o.hasRigidbody=ToInt(p[27],o.hasRigidbody?1:0)!=0;o.mass=ToFloat(p[28],o.mass);
                 o.useGravity=ToInt(p[29],o.useGravity?1:0)!=0;o.isKinematic=ToInt(p[30],o.isKinematic?1:0)!=0;}
+            if(p.size()>=42){
+                o.baseColor={ToFloat(p[31],o.baseColor.x),ToFloat(p[32],o.baseColor.y),ToFloat(p[33],o.baseColor.z)};
+                o.metallic=std::clamp(ToFloat(p[34],o.metallic),0.0f,1.0f);
+                o.roughness=std::clamp(ToFloat(p[35],o.roughness),0.045f,1.0f);
+                o.emissiveColor={ToFloat(p[36],o.emissiveColor.x),ToFloat(p[37],o.emissiveColor.y),ToFloat(p[38],o.emissiveColor.z)};
+                o.emissiveIntensity=std::clamp(ToFloat(p[39],o.emissiveIntensity),0.0f,64.0f);
+                o.normalMapScale=std::clamp(ToFloat(p[40],o.normalMapScale),0.0f,8.0f);
+                o.doubleSided=ToInt(p[41],o.doubleSided?1:0)!=0;
+            }
+            if(p.size()>=55){
+                // SET omits HasMeshRenderer, so every field sits 6 tokens earlier than in OBJ.
+                o.cameraFieldOfView=ToFloat(p[42],o.cameraFieldOfView);
+                o.cameraNearClip=ToFloat(p[43],o.cameraNearClip);
+                o.cameraFarClip=ToFloat(p[44],o.cameraFarClip);
+                o.cameraOrthographic=ToInt(p[45],o.cameraOrthographic?1:0)!=0;
+                o.cameraOrthographicSize=ToFloat(p[46],o.cameraOrthographicSize);
+                o.cameraDepth=ToInt(p[47],o.cameraDepth);
+                o.cameraBackgroundColor={ToFloat(p[48],o.cameraBackgroundColor.x),ToFloat(p[49],o.cameraBackgroundColor.y),ToFloat(p[50],o.cameraBackgroundColor.z),ToFloat(p[51],o.cameraBackgroundColor.w)};
+                o.cameraDrawSkybox=ToInt(p[52],o.cameraDrawSkybox?1:0)!=0;
+                o.cameraDrawGizmos=ToInt(p[53],o.cameraDrawGizmos?1:0)!=0;
+                o.cameraCullingMask=ToInt(p[54],o.cameraCullingMask);
+            }
+            if(p.size()>=59){
+                o.colliderCenter={ToFloat(p[55],o.colliderCenter.x),ToFloat(p[56],o.colliderCenter.y),ToFloat(p[57],o.colliderCenter.z)};
+                o.parentIndex=ToInt(p[58],o.parentIndex);
+            }
+            if(p.size()>=103){
+                o.hasCharacterController=ToInt(p[59],o.hasCharacterController?1:0)!=0;
+                o.characterHeight=ToFloat(p[60],o.characterHeight);
+                o.characterRadius=ToFloat(p[61],o.characterRadius);
+                o.characterSlopeLimit=ToFloat(p[62],o.characterSlopeLimit);
+                o.characterStepOffset=ToFloat(p[63],o.characterStepOffset);
+                o.characterSkinWidth=ToFloat(p[64],o.characterSkinWidth);
+                o.characterGravity=ToFloat(p[65],o.characterGravity);
+                o.characterSpeed=ToFloat(p[66],o.characterSpeed);
+                o.characterJumpHeight=ToFloat(p[67],o.characterJumpHeight);
+                o.characterVelocity={ToFloat(p[68],o.characterVelocity.x),ToFloat(p[69],o.characterVelocity.y),ToFloat(p[70],o.characterVelocity.z)};
+                o.characterIsGrounded=ToInt(p[71],o.characterIsGrounded?1:0)!=0;
+                o.hasParticleSystem=ToInt(p[72],o.hasParticleSystem?1:0)!=0;
+                o.particleMaxCount=ToInt(p[73],o.particleMaxCount);
+                o.particleLifetime=ToFloat(p[74],o.particleLifetime);
+                o.particleStartSpeed=ToFloat(p[75],o.particleStartSpeed);
+                o.particleStartSize=ToFloat(p[76],o.particleStartSize);
+                o.particleGravity=ToFloat(p[77],o.particleGravity);
+                o.particleEmissionRate=ToFloat(p[78],o.particleEmissionRate);
+                o.particleStartColor={ToFloat(p[79],o.particleStartColor.x),ToFloat(p[80],o.particleStartColor.y),ToFloat(p[81],o.particleStartColor.z)};
+                o.particleDirection={ToFloat(p[82],o.particleDirection.x),ToFloat(p[83],o.particleDirection.y),ToFloat(p[84],o.particleDirection.z)};
+                o.particleSpread=ToFloat(p[85],o.particleSpread);
+                o.particleLooping=ToInt(p[86],o.particleLooping?1:0)!=0;
+                o.hasAnimator=ToInt(p[87],o.hasAnimator?1:0)!=0;
+                o.animatorClipName=Base64Decode(p[88]);
+                o.animatorSpeed=ToFloat(p[89],o.animatorSpeed);
+                o.animatorLoop=ToInt(p[90],o.animatorLoop?1:0)!=0;
+                o.animatorPlaying=ToInt(p[91],o.animatorPlaying?1:0)!=0;
+                o.animatorTime=ToFloat(p[92],o.animatorTime);
+                o.hasAudioListener=ToInt(p[93],o.hasAudioListener?1:0)!=0;
+                o.audioListenerVolume=ToFloat(p[94],o.audioListenerVolume);
+                o.audioSourceVolume=ToFloat(p[95],o.audioSourceVolume);
+                o.audioSourcePitch=ToFloat(p[96],o.audioSourcePitch);
+                o.audioSourceMinDistance=ToFloat(p[97],o.audioSourceMinDistance);
+                o.audioSourceMaxDistance=ToFloat(p[98],o.audioSourceMaxDistance);
+                o.audioSourceLoop=ToInt(p[99],o.audioSourceLoop?1:0)!=0;
+                o.audioSourcePlayOnAwake=ToInt(p[100],o.audioSourcePlayOnAwake?1:0)!=0;
+                o.audioSourceClipPath=Base64Decode(p[101]);
+                o.audioSourceSpatial=ToInt(p[102],o.audioSourceSpatial?1:0)!=0;
+            }
         }else AppendHostLog(line,logs);
     }
     if(!gotEnd){logs.push_back("ERROR: C# host did not answer in 3 seconds. A script may be stuck in an infinite loop; the isolated host is stopping.");Stop();return false;}return true;

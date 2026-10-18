@@ -3,10 +3,10 @@
 
 namespace
 {
-    DX12ForgeEngine* g_engine = nullptr;
+    ForgeEngine* g_engine = nullptr;
 }
 
-LRESULT CALLBACK DX12ForgeEngine::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK ForgeEngine::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (g_engine)
     {
@@ -19,7 +19,7 @@ LRESULT CALLBACK DX12ForgeEngine::WindowProc(HWND hwnd, UINT message, WPARAM wPa
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
-    DX12ForgeEngine engine;
+    ForgeEngine engine;
     g_engine = &engine;
 
     try
@@ -30,7 +30,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     }
     catch (const std::exception& exception)
     {
-        MessageBoxA(nullptr, exception.what(), "DX12 Forge Engine - Erro", MB_OK | MB_ICONERROR);
+        MessageBoxA(nullptr, exception.what(), "Forge Engine - Erro", MB_OK | MB_ICONERROR);
         return 1;
     }
 }

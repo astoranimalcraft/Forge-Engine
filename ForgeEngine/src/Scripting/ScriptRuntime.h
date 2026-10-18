@@ -25,11 +25,79 @@ struct ForgeScriptObjectState
     int layer = 0;
     int colliderType = 0; // 0=Box, 1=Sphere, 2=Capsule
     ForgeScriptVec3 colliderSize{1.0f,1.0f,1.0f};
+    ForgeScriptVec3 colliderCenter{0.0f,0.0f,0.0f};
+    int parentIndex = -1;
+
+    // --- Character controller -----------------------------------------------------
+    bool hasCharacterController = false;
+    float characterHeight = 1.8f;
+    float characterRadius = 0.3f;
+    float characterSlopeLimit = 45.0f;
+    float characterStepOffset = 0.3f;
+    float characterSkinWidth = 0.02f;
+    float characterGravity = -9.81f;
+    float characterSpeed = 6.0f;
+    float characterJumpHeight = 1.2f;
+    ForgeScriptVec3 characterVelocity{0.0f,0.0f,0.0f};
+    bool characterIsGrounded = false;
+
+    // --- Particle system ----------------------------------------------------------
+    bool hasParticleSystem = false;
+    int particleMaxCount = 512;
+    float particleLifetime = 2.0f;
+    float particleStartSpeed = 2.0f;
+    float particleStartSize = 0.15f;
+    float particleGravity = -1.5f;
+    float particleEmissionRate = 40.0f;
+    ForgeScriptVec3 particleStartColor{1.0f,0.85f,0.45f};
+    ForgeScriptVec3 particleDirection{0.0f,1.0f,0.0f};
+    float particleSpread = 20.0f;
+    bool particleLooping = true;
+
+    // --- Animator -----------------------------------------------------------------
+    bool hasAnimator = false;
+    std::string animatorClipName;
+    float animatorSpeed = 1.0f;
+    bool animatorLoop = true;
+    bool animatorPlaying = true;
+    float animatorTime = 0.0f;
+
+    // --- Audio --------------------------------------------------------------------
+    bool hasAudioListener = false;
+    float audioListenerVolume = 1.0f;
+    float audioSourceVolume = 1.0f;
+    float audioSourcePitch = 1.0f;
+    float audioSourceMinDistance = 1.0f;
+    float audioSourceMaxDistance = 500.0f;
+    bool audioSourceLoop = false;
+    bool audioSourcePlayOnAwake = false;
+    std::string audioSourceClipPath;
+    bool audioSourceSpatial = true;
     bool isTrigger = false;
     bool hasRigidbody = false;
     float mass = 1.0f;
     bool useGravity = true;
     bool isKinematic = false;
+    // Material / PBR values mirrored to managed scripts.
+    ForgeScriptVec3 baseColor{1.0f,1.0f,1.0f};
+    float metallic = 0.0f;
+    float roughness = 0.6f;
+    ForgeScriptVec3 emissiveColor{0.0f,0.0f,0.0f};
+    float emissiveIntensity = 0.0f;
+    float normalMapScale = 1.0f;
+    bool doubleSided = false;
+    // Camera values mirrored to managed scripts.
+    float cameraFieldOfView = 60.0f;
+    float cameraNearClip = 0.05f;
+    float cameraFarClip = 1000.0f;
+    bool cameraOrthographic = false;
+    float cameraOrthographicSize = 5.0f;
+    int cameraDepth = 0;
+    struct Vec4 { float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f; };
+    Vec4 cameraBackgroundColor{0.02f, 0.03f, 0.05f, 1.0f};
+    bool cameraDrawSkybox = true;
+    bool cameraDrawGizmos = true;
+    int cameraCullingMask = 0x7FFFFFFF;
     std::vector<ForgeScriptAttachment> scripts;
 };
 struct ForgeScriptCommand

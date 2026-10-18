@@ -15,7 +15,7 @@ A detecção automática do Visual Studio procura as versões 18.0, 17.0, 16.0 e
 
 ## 2. Compilar a engine nativa
 
-Abra **Developer PowerShell** do Visual Studio e navegue para a pasta `DX12ForgeEngine` que contém `CMakeLists.txt`:
+Abra **Developer PowerShell** do Visual Studio e navegue para a pasta `ForgeEngine` que contém `CMakeLists.txt`:
 
 ```powershell
 cmake --version
@@ -32,7 +32,7 @@ cmake --build --preset release
 Executável Debug esperado:
 
 ```text
-out/build/windows-ninja/Debug/DX12ForgeEngine.exe
+out/build/windows-ninja/Debug/ForgeEngine.exe
 ```
 
 Se precisar reconfigurar do zero:
@@ -55,7 +55,7 @@ dotnet build .\Project\Scripts\ForgeGameScripts.csproj --configuration Debug
 dotnet build .\Scripting\ForgeScriptHost\ForgeScriptHost.csproj --configuration Debug
 ```
 
-Depois abra `out/build/windows-ninja/Debug/DX12ForgeEngine.exe`. O editor também compila os dois projetos ao usar **Ctrl+S** ou iniciar Play Mode. Antes do build, o runtime ajusta o `ProjectReference` de `ForgeEngine.API.csproj` ao caminho real da cópia da engine. Se ainda houver erro, consulte `Scripts/build.log` e `Scripts/host-build.log`; o executável precisa do .NET 8 SDK instalado para compilar e do runtime .NET 8 para executar o host.
+Depois abra `out/build/windows-ninja/Debug/ForgeEngine.exe`. O editor também compila os dois projetos ao usar **Ctrl+S** ou iniciar Play Mode. Antes do build, o runtime ajusta o `ProjectReference` de `ForgeEngine.API.csproj` ao caminho real da cópia da engine. Se ainda houver erro, consulte `Scripts/build.log` e `Scripts/host-build.log`; o executável precisa do .NET 8 SDK instalado para compilar e do runtime .NET 8 para executar o host.
 
 ## 4. Problemas comuns
 
@@ -113,7 +113,7 @@ Inclua:
 
 ## 6. Projeto Hub e cenas
 
-- Um projeto novo usa `DX12Forge.project` como marcador. Selecione esse arquivo em **Open Project...**.
+- Um projeto novo usa `ForgeEngine.project` como marcador. Selecione esse arquivo em **Open Project...**.
 - A cena padrão está em `Assets/Scenes/Default.forgeScene`; versões 1–4 continuam aceitas e a versão 5 guarda relação pai/filho, caminhos de modelos e alturas do terreno.
 - O editor procura fontes da engine subindo as pastas a partir do diretório do executável. Mantenha o executável dentro de uma árvore que contenha `CMakeLists.txt` e `src/Engine/Engine.h`, ou ajuste a descoberta de `sourceRoot` para um layout de distribuição diferente.
 - Se o céu parecer superexposto, abra `Window → Post Processing` e reduza `Exposure`; o céu é HDR antes do tone mapping.

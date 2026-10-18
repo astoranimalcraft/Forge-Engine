@@ -90,7 +90,7 @@ O Play Mode executa os scripts C# e sincroniza os campos de Transform, renderer 
 
 ### Project Hub
 
-Ao iniciar, a engine apresenta um splash de carregamento dos recursos nativos e abre o Project Hub. Use **New Project** para criar um projeto ou **Open Project...** para selecionar `DX12Forge.project`. A lista de projetos recentes usa cartões com uma ilustração genérica e a data de criação. Ao abrir um projeto, outra tela mostra as etapas de preparação de pastas e carregamento da cena.
+Ao iniciar, a engine apresenta um splash de carregamento dos recursos nativos e abre o Project Hub. Use **New Project** para criar um projeto ou **Open Project...** para selecionar `ForgeEngine.project`. A lista de projetos recentes usa cartões com uma ilustração genérica e a data de criação. Ao abrir um projeto, outra tela mostra as etapas de preparação de pastas e carregamento da cena.
 
 ### Pastas e assets
 

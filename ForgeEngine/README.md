@@ -1,10 +1,10 @@
-# DX12 Forge Engine v0.5.8
+# Forge Engine v0.5.8
 
 This build adds the Export Game workflow (standalone player with name/icon/creator), a much larger Unity-style C# API (Quaternion, tag/layer, Instantiate/Destroy, State-backed colliders and rigidbodies, PlayerPrefs, Application config), a fixed blue UE5-style daytime sky, parent/child hierarchy corrections, gizmo snapping with parent-aware dragging and a stable (non-flickering) Project Explorer. See [`docs/PATCH_NOTES_v057.md`](docs/PATCH_NOTES_v057.md).
 
-# DX12 Forge Engine
+# Forge Engine
 
-DX12 Forge Engine v0.5.8 é uma base de engine/editor 3D em C++17, Win32 e DirectX 12, com API C# expandida, céu procedural e pós-processamento HDR. A interface integrada usa **Dear ImGui (branch docking)** + **ImGuizmo**, com a cena DirectX 12 renderizada sob a região central transparente do docking (sem janela Scene separada).
+Forge Engine v0.5.8 é uma base de engine/editor 3D em C++17, Win32 e DirectX 12, com API C# expandida, céu procedural e pós-processamento HDR. A interface integrada usa **Dear ImGui (branch docking)** + **ImGuizmo**, com a cena DirectX 12 renderizada sob a região central transparente do docking (sem janela Scene separada).
 
 
 ## Documentação completa
@@ -60,7 +60,7 @@ cmake --preset windows-ninja
 cmake --build --preset debug
 ```
 
-Executável Debug: `out/build/windows-ninja/Debug/DX12ForgeEngine.exe`.
+Executável Debug: `out/build/windows-ninja/Debug/ForgeEngine.exe`.
 
 ## Inicialização e projetos
 
@@ -98,7 +98,7 @@ Executável Debug: `out/build/windows-ninja/Debug/DX12ForgeEngine.exe`.
 ## Estrutura
 
 ```text
-DX12ForgeEngine/
+ForgeEngine/
 ├── CMakeLists.txt
 ├── CMakePresets.json
 ├── README.md
@@ -150,7 +150,7 @@ DX12ForgeEngine/
 ## Correções de compilação desta revisão
 
 - A declaração de `ImGui_ImplWin32_WndProcHandler` foi adicionada explicitamente no `.cpp` da UI.
-- O construtor de `DX12ForgeEngine` foi movido para o `.cpp`, onde `DX12ForgeEditorUI` está completo, evitando a instanciação de `unique_ptr` com tipo incompleto.
+- O construtor de `ForgeEngine` foi movido para o `.cpp`, onde `ForgeEngineEditorUI` está completo, evitando a instanciação de `unique_ptr` com tipo incompleto.
 - A cópia do nome do arquivo de cena usa cópia limitada terminada em NUL, sem a chamada CRT insegura `wcsncpy`.
 
 A compilação definitiva requer Windows, MSVC, Windows SDK, CMake, Ninja, Git e acesso à internet para obter Dear ImGui e ImGuizmo na primeira configuração.
@@ -383,7 +383,7 @@ See [`docs/PATCH_NOTES_v051.md`](docs/PATCH_NOTES_v051.md) for the latest fixes 
 
 ## v0.5.5 ImGui assertion hotfix
 
-The Project Hub (welcome screen) now finalizes its ImGui frame with `ImGui::Render()` before returning from `DX12ForgeEditorUI::Draw()`. See `docs/PATCH_NOTES_v055.md`.
+The Project Hub (welcome screen) now finalizes its ImGui frame with `ImGui::Render()` before returning from `ForgeEngineEditorUI::Draw()`. See `docs/PATCH_NOTES_v055.md`.
 
 ## v0.5.6 C# host fix, sky, camera viewport and tooling
 

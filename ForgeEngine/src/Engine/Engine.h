@@ -24,14 +24,14 @@ using DirectX::XMFLOAT3;
 using DirectX::XMFLOAT4;
 using DirectX::XMFLOAT4X4;
 
-class DX12ForgeEditorUI;
+class ForgeEditorUI;
 
-class DX12ForgeEngine final
+class ForgeEngine final
 {
-    friend class DX12ForgeEditorUI;
+    friend class ForgeEditorUI;
 public:
-    DX12ForgeEngine();
-    ~DX12ForgeEngine();
+    ForgeEngine();
+    ~ForgeEngine();
 
     bool Initialize(HINSTANCE instance, int showCommand);
     int Run();
@@ -102,6 +102,8 @@ private:
         XMFLOAT4 material; // x = metallic, y = roughness, z = has albedo texture, w = light/drag-preview emissive mode
         XMFLOAT4 uvTransform; // xy = tiling, zw = offset
         XMFLOAT4 materialMaps; // x = normal map, y = metallic/roughness map, z = AO map, w = normal scale
+        XMFLOAT4 emissive;    // rgb = emission tint, w = emission intensity
+        XMFLOAT4 materialFlags; // x = emissive map, y = occlusion strength, zw reserved
     };
 
     struct VertexRange
@@ -131,10 +133,16 @@ private:
         XMFLOAT4 baseColor{ 0.7f, 0.7f, 0.7f, 1.0f };
         float metallic = 0.0f;
         float roughness = 0.6f;
+        XMFLOAT3 emissiveColor{ 0.0f, 0.0f, 0.0f };
+        float emissiveIntensity = 0.0f;
+        float normalMapScale = 1.0f;
+        float occlusionStrength = 1.0f;
+        bool doubleSided = false;
         float localBoundsRadius = 1.7320508f;
         XMFLOAT2 textureTiling{ 1.0f, 1.0f };
         XMFLOAT2 textureOffset{ 0.0f, 0.0f };
         bool meshRendererEnabled = true;
+        bool hasMaterial = true; // when false the Material/PBR inspector section is hidden
         bool isDragPreview = false; // temporary object shown while dragging an asset over the Scene
         bool isDragPreviewEmissive = false; // model preview remains legible against dark or bright sky
         bool isTerrain = false;
@@ -147,6 +155,13 @@ private:
         float cameraFieldOfView = 60.0f;
         float cameraNearClip = 0.05f;
         float cameraFarClip = 1000.0f;
+        bool cameraOrthographic = false;
+        float cameraOrthographicSize = 5.0f;
+        int cameraDepth = 0;
+        XMFLOAT4 cameraBackgroundColor{ 0.02f, 0.03f, 0.05f, 1.0f };
+        bool cameraDrawSkybox = true;
+        bool cameraDrawGizmos = true;
+        int cameraCullingMask = 0x7FFFFFFF; // bit per layer; matches Unity's Everything default
         std::vector<Vertex> terrainVertices;
         std::vector<std::uint32_t> terrainIndices;
         LightType lightType = LightType::None;
@@ -160,6 +175,8 @@ private:
         bool hasCollider = false;
         int colliderType = 0; // 0=Box, 1=Sphere, 2=Capsule
         XMFLOAT3 colliderSize{ 1.0f, 1.0f, 1.0f };
+        // Offset of the collision shape from the object origin, in local space.
+        XMFLOAT3 colliderCenter{ 0.0f, 0.0f, 0.0f };
         bool isTrigger = false;
         bool hasRigidbody = false;
         float rigidbodyMass = 1.0f;
@@ -167,24 +184,79 @@ private:
         bool rigidbodyIsKinematic = false;
         bool hasAudioSource = false;
         bool hasScript = false;
+
+        // --- Character controller -------------------------------------------------
+        // Kinematic capsule driven by the script/editor layer; the solver only resolves
+        // its collisions, so slope/step handling stays deterministic.
+        bool hasCharacterController = false;
+        float characterHeight = 1.8f;
+        float characterRadius = 0.3f;
+        float characterSlopeLimit = 45.0f;
+        float characterStepOffset = 0.3f;
+        float characterSkinWidth = 0.02f;
+        float characterGravity = -9.81f;
+        float characterSpeed = 6.0f;
+        float characterJumpHeight = 1.2f;
+        XMFLOAT3 characterVelocity{ 0.0f, 0.0f, 0.0f };
+        bool characterIsGrounded = false;
+
+        // --- Particle system ------------------------------------------------------
+        bool hasParticleSystem = false;
+        int particleMaxCount = 512;
+        float particleLifetime = 2.0f;
+        float particleStartSpeed = 2.0f;
+        float particleStartSize = 0.15f;
+        float particleGravity = -1.5f;
+        float particleEmissionRate = 40.0f;
+        XMFLOAT3 particleStartColor{ 1.0f, 0.85f, 0.45f };
+        XMFLOAT3 particleDirection{ 0.0f, 1.0f, 0.0f };
+        float particleSpread = 20.0f;
+        bool particleLooping = true;
+
+        // --- Animator -------------------------------------------------------------
+        // The engine has no skinned-mesh pipeline, so this drives transform animation
+        // clips (position/rotation/scale keys) applied to this object at runtime.
+        bool hasAnimator = false;
+        std::string animatorClipName;
+        float animatorSpeed = 1.0f;
+        bool animatorLoop = true;
+        bool animatorPlaying = true;
+        float animatorTime = 0.0f;
+
+        // --- Audio listener -------------------------------------------------------
+        // Exactly one object should own the listener; it defines the ear transform.
+        bool hasAudioListener = false;
+        float audioListenerVolume = 1.0f;
+        float audioSourceVolume = 1.0f;
+        float audioSourcePitch = 1.0f;
+        float audioSourceMinDistance = 1.0f;
+        float audioSourceMaxDistance = 500.0f;
+        bool audioSourceLoop = false;
+        bool audioSourcePlayOnAwake = false;
+        std::string audioSourceClipPath;
+        bool audioSourceSpatial = true;
         std::vector<ScriptComponentData> scriptComponents;
         std::string importedModelPath;
         std::string albedoTexturePath;
         std::string normalTexturePath;
         std::string metallicRoughnessTexturePath;
         std::string aoTexturePath;
+        std::string emissiveTexturePath;
         std::string loadedAlbedoTexturePath;
         std::string loadedNormalTexturePath;
         std::string loadedMetallicRoughnessTexturePath;
         std::string loadedAoTexturePath;
+        std::string loadedEmissiveTexturePath;
         Microsoft::WRL::ComPtr<ID3D12Resource> albedoTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> normalTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> metallicRoughnessTexture;
         Microsoft::WRL::ComPtr<ID3D12Resource> aoTexture;
+        Microsoft::WRL::ComPtr<ID3D12Resource> emissiveTexture;
         UINT albedoSrvIndex = 1; // HDR SRV is a valid fallback when no albedo map is assigned.
         UINT normalSrvIndex = 1;
         UINT metallicRoughnessSrvIndex = 1;
         UINT aoSrvIndex = 1;
+        UINT emissiveSrvIndex = 1;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> objectConstants;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> outlineConstants;
         std::array<Microsoft::WRL::ComPtr<ID3D12Resource>, FrameCount> colliderConstants;
@@ -267,7 +339,7 @@ private:
 
 private:
     HINSTANCE m_instance = nullptr;
-    std::unique_ptr<DX12ForgeEditorUI> m_editorUI;
+    std::unique_ptr<ForgeEditorUI> m_editorUI;
     HWND m_hwnd = nullptr;
     HWND m_splashHwnd = nullptr;
     std::wstring m_splashMessage = L"Initializing DirectX 12...";
@@ -351,6 +423,9 @@ private:
     std::wstring m_gameTitle;
     std::wstring m_gameIconPath;
     std::wstring m_gameCreator;
+    // Folder (relative to the executable) that stores the exported game's data,
+    // mirroring Unity's "<Product>_Data" layout.
+    std::wstring m_gameProjectFolder;
     float m_sceneViewportX = 0.0f;
     float m_sceneViewportY = 0.0f;
     float m_sceneViewportWidth = 1440.0f;
@@ -392,6 +467,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pbrPipeline;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pbrDoubleSidedPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_shadowPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_skyGridPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_outlinePipeline;

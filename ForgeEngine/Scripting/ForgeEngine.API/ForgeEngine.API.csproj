@@ -4,5 +4,30 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- BulletSharp only ships net40-client assets; the net8.0 fallback works. -->
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BulletSharp" Version="0.11.1" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!--
+    BulletSharp's own build targets only rename the native library to
+    libbulletc.dll, so on Linux the loader never finds libbulletc.so. Copy the
+    right native binary next to the output ourselves. Content items are picked up
+    by GetCopyToOutputDirectoryItems, so this also flows into every project that
+    references ForgeEngine.API (the script host and the game's script project).
+  -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <Content Include="$(PkgBulletSharp)/build/net40-client/libbulletc-linux-x64.so"
+             Link="libbulletc.so"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Include="$(PkgBulletSharp)/build/net40-client/libbulletc-windows-x64.dll"
+             Link="libbulletc.dll"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

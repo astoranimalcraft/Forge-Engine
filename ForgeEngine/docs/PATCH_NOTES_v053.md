@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.3 — Editor, project workflow and rendering
+# Forge Engine v0.5.3 — Editor, project workflow and rendering
 
 ## Rendering and sky
 

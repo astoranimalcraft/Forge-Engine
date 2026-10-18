@@ -1,4 +1,4 @@
-# DX12 Forge Engine v0.5.4 — Shadow, Culling, Picking, Camera and PBR Fixes
+# Forge Engine v0.5.4 — Shadow, Culling, Picking, Camera and PBR Fixes
 
 ## Changes
 
