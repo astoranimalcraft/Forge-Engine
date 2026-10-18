@@ -297,9 +297,11 @@ Things that were wrong at first and are easy to reintroduce:
 
 Test it with a harness that mirrors the host's frame order (native echo -> `SyncObjects`
 -> fixed physics steps -> `Update`) and injects input through `Input.BeginFrame`. Note
-that `RuntimeObjectData.Rotation` is in **degrees** while `Transform.rotation` is in
-radians, and that `InputMap` only resolves `GetButton("Jump")`/`GetButton("Run")` when
-`Config/Inputs.json` is reachable, so a test outside the project tree needs a copy of it.
+that every Euler angle in the API (`Transform.rotation`, `RuntimeObjectData.Rotation`,
+`Quaternion.Euler`) is in **degrees**; only the `Quaternion` type itself is a unit
+quaternion. Passing radians for a 20-degree ramp gives 0.35 degrees, which reads as flat
+ground rather than a slope. Also, `InputMap` only resolves `GetButton("Jump")`/`GetButton("Run")`
+when `Config/Inputs.json` is reachable, so a test outside the project tree needs a copy of it.
 
 ## Known C# API gaps
 
