@@ -1,65 +1,84 @@
 // First-person controller: walks with WASD, looks with the mouse, jumps with Space.
+//
 // Setup in the editor:
-//   1. Create an object (GameObject > Create > Capsule) and name it "Player".
-//   2. Add Component > Physics > Collider  (Capsule) and Rigidbody.
-//   3. Add Component > Camera & Audio > Camera. The camera sits at this object's origin,
-//      so raise the view by putting the Camera on a child later, or just offset the eye height below.
+//   1. Create a Capsule (GameObject > Create > Capsule) and name it "Player".
+//   2. Add Component > Physics > Character Controller. Remove any Rigidbody: the controller
+//      owns the movement, and a Rigidbody on the same object would fight it.
+//   3. Create a second object named "Camera", add Component > Camera, and drag it into the
+//      "cameraObject" field below. The camera is moved to the player's eye each frame.
+//      (Leaving it empty falls back to Camera.main, or to a Camera on the player itself.)
 //   4. Add Component > Script C# > FirstPersonController.
 //
-// How physics is enabled: a Rigidbody alone does nothing. Bullet creates the body from the
-// Collider, so you need BOTH. The collider's size comes from the object's scale, so a
-// Capsule with scale (1, 2, 1) gives a 2-unit-tall capsule.
+// Collision is resolved by CharacterController.Move, which sweeps the capsule against the
+// world, so the player stops at walls, slides along them and steps over low obstacles.
 using ForgeEngine;
 
 public sealed class FirstPersonController : MonoBehaviour
 {
-    public float moveSpeed = 5f;
-    public float sprintSpeed = 9f;
-    public float jumpSpeed = 5f;
-    public float mouseSensitivity = 2.5f;
-    public float gravity = 20f;
+    /// <summary>Camera to drive. Empty falls back to the main camera, or one on this object.</summary>
+    public GameObject? cameraObject;
 
-    private Rigidbody _body = null!;
+    public float walkSpeed = 4.5f;
+    public float sprintSpeed = 8f;
+    public float mouseSensitivity = 2.5f;
+    public float eyeHeight = 0.75f;
+    public float minPitch = -89f;
+    public float maxPitch = 89f;
+    public bool canJump = true;
+
+    private CharacterController _controller = null!;
+    private Camera? _camera;
+    private float _yaw;
     private float _pitch;
-    private float _verticalVelocity;
 
     public override void Start()
     {
-        _body = GetComponent<Rigidbody>()!;
-        _pitch = transform.rotation.x;
+        _controller = GetComponent<CharacterController>()!;
+        _camera = cameraObject is not null ? cameraObject.GetComponent<Camera>() : Camera.main;
 
-        // The player must not tumble when it hits a wall.
-        _body.freezeRotationX = true;
-        _body.freezeRotationY = true;
-        _body.freezeRotationZ = true;
+        // A Camera on the player itself has no separate object to pitch, so it is driven in place.
+        if (_camera is null) _camera = GetComponent<Camera>();
+
+        _yaw = transform.rotation.y;
+        _pitch = 0f;
+        ApplyLook();
     }
 
     public override void Update()
     {
-        // Mouse look. "Mouse X"/"Mouse Y" come from Config/Inputs.json.
-        float mouseX = Input.GetAxisRaw("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxisRaw("Mouse Y") * mouseSensitivity;
-        _pitch = Mathf.Clamp(_pitch - mouseY, -89f, 89f);
-        transform.rotation = new Vector3(_pitch, transform.rotation.y + mouseX, 0f);
+        // Mouse look. "Mouse X"/"Mouse Y" come from Config/Inputs.json. Mouse Y is positive
+        // when the mouse moves up, so pitch subtracts it to look up.
+        _yaw += Input.GetAxisRaw("Mouse X") * mouseSensitivity;
+        _pitch = Mathf.Clamp(_pitch - Input.GetAxisRaw("Mouse Y") * mouseSensitivity, minPitch, maxPitch);
 
-        // Horizontal movement is done by setting velocity, which is what the solver reads.
-        float speed = Input.GetButton("Run") ? sprintSpeed : moveSpeed;
-        Vector3 wish = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical")).normalized;
-        Vector3 world = transform.TransformDirection(wish) * speed;
+        // The body only turns on the spot; pitch belongs to the camera so the capsule stays upright.
+        transform.rotation = new Vector3(0f, _yaw, 0f);
+        ApplyLook();
 
-        Vector3 velocity = _body.velocity;
-        _body.velocity = new Vector3(world.x, velocity.y, world.z);
+        if (canJump && Input.GetButton("Jump") && _controller.isGrounded)
+            _controller.Jump();
+
+        float speed = Input.GetButton("Run") ? sprintSpeed : walkSpeed;
+        Vector3 wish = new Vector3(Input.GetAxisRaw("Horizontal"), 0f, Input.GetAxisRaw("Vertical"));
+        if (wish.sqrMagnitude > 1f) wish = wish.normalized;
+
+        // Move takes a displacement for this frame; gravity and collisions are handled inside.
+        Vector3 world = Quaternion.Euler(0f, _yaw, 0f) * wish * (speed * Time.deltaTime);
+        _controller.Move(world);
     }
 
-    public override void FixedUpdate()
+    /// <summary>Places the camera at the eye and applies the pitch, or tilts it in place.</summary>
+    private void ApplyLook()
     {
-        // Jump and gravity run on the fixed step so the solver sees a stable velocity.
-        Vector3 velocity = _body.velocity;
-        if (Input.GetButton("Jump") && Mathf.Abs(velocity.y) < 0.05f)
-            _verticalVelocity = jumpSpeed;
-        else
-            _verticalVelocity -= gravity * Time.fixedDeltaTime;
+        if (_camera is null) return;
 
-        _body.velocity = new Vector3(velocity.x, _verticalVelocity, velocity.z);
+        if (ReferenceEquals(_camera.gameObject, gameObject))
+        {
+            transform.rotation = new Vector3(_pitch, _yaw, 0f);
+            return;
+        }
+
+        _camera.transform.position = transform.position + Vector3.up * eyeHeight;
+        _camera.transform.rotation = new Vector3(_pitch, _yaw, 0f);
     }
 }

@@ -1279,9 +1279,13 @@ public sealed class CharacterController : Component
     /// <summary>Vertical speed needed to reach <see cref="jumpHeight"/> under the current gravity.</summary>
     public float jumpSpeed => MathF.Sqrt(2f * MathF.Abs(gravity) * jumpHeight);
 
+    /// <summary>Half of the capsule's total height, measured from the transform origin.</summary>
+    private float halfHeight => MathF.Max(radius, height * 0.5f);
+
     /// <summary>
     /// Integrates one step of horizontal motion plus gravity and writes the resulting transform.
-    /// Ground probing uses a short downward sweep so jumping and slopes behave predictably.
+    /// Horizontal motion is swept against the world, so a wall stops the character and it slides
+    /// along the surface; vertical motion is swept separately so floors and ceilings are found.
     /// </summary>
     public void Move(Vector3 motion)
     {
@@ -1291,26 +1295,39 @@ public sealed class CharacterController : Component
         velocity.x = motion.x / dt;
         velocity.z = motion.z / dt;
 
-        bool grounded = isGrounded;
-        if (grounded && velocity.y < 0f) velocity.y = -0.5f;
+        var collider = GetComponent<Collider>();
+        Vector3 position = transform.position;
+
+        Vector3 horizontal = new(motion.x, 0f, motion.z);
+        if (horizontal.sqrMagnitude > 1e-10f)
+            position = MoveWithSlide(position, horizontal, collider);
+
         velocity.y += gravity * dt;
+        Vector3 vertical = new(0f, velocity.y * dt, 0f);
+        bool grounded = false;
 
-        if (TryResolveGround(transform.position, motion, out float groundY))
+        if (MathF.Abs(vertical.y) > 1e-8f)
         {
-            grounded = true;
-            if (velocity.y <= 0f)
+            if (Physics.SweepCapsule(position, radius, height, vertical, collider, out RaycastHit hit))
             {
+                position += vertical.normalized * MathF.Max(0f, hit.distance - skinWidth);
+                grounded = velocity.y < 0f;
                 velocity.y = 0f;
-                motion.y = groundY - transform.position.y;
             }
-        }
-        else
-        {
-            grounded = false;
-            motion.y += velocity.y * dt;
+            else position += vertical;
         }
 
-        transform.position += motion;
+        // While walking, keep the capsule glued to the ground so it does not float above
+        // slopes and steps. Only snap when the drop is within the step offset.
+        if (!grounded && velocity.y <= 0f && TryFindGround(position, collider, out float groundY) &&
+            position.y - groundY <= stepOffset + skinWidth)
+        {
+            position.y = groundY;
+            grounded = true;
+            velocity.y = 0f;
+        }
+
+        transform.position = position;
         gameObject.State.CharacterVelocity = velocity;
         isGrounded = grounded;
         moveVelocity = velocity;
@@ -1334,18 +1351,79 @@ public sealed class CharacterController : Component
         moveVelocity = Vector3.zero;
     }
 
-    /// <summary>Sweeps a short distance below the capsule to find walkable ground.</summary>
-    private bool TryResolveGround(Vector3 position, Vector3 motion, out float groundY)
+    /// <summary>
+    /// Sweeps the capsule along <paramref name="motion"/>. A low obstacle or a walkable slope is
+    /// climbed, anything else is slid along. Without this the character would walk through walls.
+    /// </summary>
+    private Vector3 MoveWithSlide(Vector3 position, Vector3 motion, Collider? collider)
+    {
+        // Two passes resolve a single wall and the common case of a wall meeting a step.
+        Vector3 remaining = motion;
+        for (int pass = 0; pass < 2 && remaining.sqrMagnitude > 1e-10f; pass++)
+        {
+            if (!Physics.SweepCapsule(position, radius, height, remaining, collider, out RaycastHit hit))
+            {
+                position += remaining;
+                break;
+            }
+
+            if (TryStepUp(position, remaining, collider, out Vector3 stepped))
+            {
+                position = stepped;
+                break;
+            }
+
+            float allowed = MathF.Max(0f, hit.distance - skinWidth);
+            position += remaining.normalized * allowed;
+            remaining -= remaining.normalized * allowed;
+
+            // Slide along the obstacle: drop only the part of the motion that pushes into it.
+            // The normal is flattened to horizontal so a step's rounded edge cannot be mistaken
+            // for a slope and lift the character, and vertical motion is left to the sweep in Move.
+            Vector3 normal = new(hit.normal.x, 0f, hit.normal.z);
+            if (normal.sqrMagnitude < 1e-8f) remaining = Vector3.zero;
+            else
+            {
+                normal = normal.normalized;
+                remaining -= normal * Vector3.Dot(remaining, normal);
+            }
+        }
+        return position;
+    }
+
+    /// <summary>
+    /// Raises the capsule by the step offset and retries the move, which is how a low step or a
+    /// walkable slope is climbed. The move is only accepted when the surface it lands on is
+    /// inside the slope limit, so a steep slope or a wall taller than the offset is still refused.
+    /// </summary>
+    private bool TryStepUp(Vector3 position, Vector3 motion, Collider? collider, out Vector3 result)
+    {
+        result = position;
+        if (stepOffset <= 1e-4f) return false;
+
+        Vector3 raised = position + new Vector3(0f, stepOffset, 0f);
+        if (Physics.SweepCapsule(raised, radius, height, motion, collider, out _)) return false;
+
+        // Judging walkability from the surface we would stand on avoids the contact normal, which
+        // at a box edge points diagonally and would read as a shallow ramp.
+        Vector3 landed = raised + motion;
+        if (!TryFindGround(landed, collider, out _)) return false;
+
+        result = landed;
+        return true;
+    }
+
+    /// <summary>Probes down from the capsule centre, ignoring the character's own collider.</summary>
+    private bool TryFindGround(Vector3 position, Collider? collider, out float groundY)
     {
         groundY = position.y;
         float probe = MathF.Max(0.05f, stepOffset + skinWidth);
-        Vector3 foot = position + new Vector3(motion.x, 0f, motion.z) - new Vector3(0f, radius, 0f);
-        if (Physics.Raycast(foot, Vector3.down, out RaycastHit hit, probe + radius + skinWidth))
+        if (Physics.RaycastIgnoring(position, Vector3.down, halfHeight + probe, collider, out RaycastHit hit))
         {
             // Reject surfaces steeper than the slope limit so the character slides off cliffs.
             if (Vector3.Angle(hit.normal, Vector3.up) <= slopeLimit)
             {
-                groundY = hit.point.y + radius;
+                groundY = hit.point.y + halfHeight;
                 return true;
             }
         }

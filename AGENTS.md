@@ -258,6 +258,49 @@ BulletSharp 0.11.1 dates from 2016 and is effectively unmaintained. Its managed 
 differs from current BulletSharp docs, so confirm signatures by reflection before
 writing against it.
 
+### CharacterController: sweeps, not a solver body
+
+`CharacterController.Move` is kinematic: it sweeps a `CapsuleShape` through the world
+and resolves the result itself, so it never becomes a rigid body. The pieces are
+`Physics.SweepCapsule` (one convex sweep) and `MoveWithSlide` / `TryStepUp` /
+`TryFindGround` in `RuntimeAPI.cs`.
+
+Things that were wrong at first and are easy to reintroduce:
+
+- The sweep's travel is `ClosestHitFraction * |motion|`. The property is
+  `ClosestHitFraction`, not `HitFraction`, and it is a **fraction** of the motion. Using
+  the distance to the contact point instead adds the capsule's own radius and parks the
+  character short of (or inside) every wall.
+- The character's own collider must be skipped or the sweep starts already touching it.
+  `CharacterSweepCallback.NeedsCollision` compares `UserObject` against the collider passed
+  in. A `CharacterController` with no `Collider` component on the same object is also
+  valid; `Move` only passes a collider when one exists.
+- Do **not** filter "walkable" hits out inside the sweep by comparing the contact normal
+  to `slopeLimit`. At a box edge Bullet reports the sphere-versus-edge normal, which is
+  diagonal (~22 degrees on a right-angled step), so a slope-angle filter either swallows
+  step edges (walking through them) or refuses to climb slopes. The decision has to come
+  from the surface the character would stand on: `TryStepUp` re-probes with `TryFindGround`
+  and accepts only if that surface is within the slope limit.
+- Walkability is judged per-hit in `MoveWithSlide` only to decide whether a wall may hide a
+  step. Step-up must be tried *only* for a non-walkable hit: a walkable hit already gets
+  climbed by sliding, and testing step-up first launches the character up a slope in
+  `stepOffset` chunks.
+- Sliding along a wall must use the **horizontal** part of the hit normal. Projecting the
+  remaining motion onto the full normal lets a step's rounded edge lift the character,
+  which reads as the capsule climbing a wall.
+- The ground probe casts down `halfHeight + stepOffset + skinWidth` from the capsule
+  centre and rejects surfaces steeper than `slopeLimit`. `halfHeight` is `height * 0.5`,
+  not `radius`; using `radius` sinks the character by half its height.
+- `Move` takes a per-frame **displacement** and divides by `Time.deltaTime` to recover a
+  velocity, so it must be called from `Update` with `speed * Time.deltaTime`, not from
+  `FixedUpdate`. Gravity is integrated inside `Move`; `Jump()` only adds the impulse.
+
+Test it with a harness that mirrors the host's frame order (native echo -> `SyncObjects`
+-> fixed physics steps -> `Update`) and injects input through `Input.BeginFrame`. Note
+that `RuntimeObjectData.Rotation` is in **degrees** while `Transform.rotation` is in
+radians, and that `InputMap` only resolves `GetButton("Jump")`/`GetButton("Run")` when
+`Config/Inputs.json` is reachable, so a test outside the project tree needs a copy of it.
+
 ## Known C# API gaps
 
 These are declared but not wired, so they silently do nothing. Check them before

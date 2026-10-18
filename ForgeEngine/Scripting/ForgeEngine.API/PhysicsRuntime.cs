@@ -694,6 +694,105 @@ public static class Physics
         return results.OrderBy(h => h.distance).ToArray();
     }
 
+    /// <summary>
+    /// Raycast that ignores one collider. The character's ground probe starts inside its own
+    /// capsule, so without this it would always hit itself and never find the floor.
+    /// </summary>
+    internal static bool RaycastIgnoring(Vector3 origin, Vector3 direction, float maxDistance,
+        Collider? ignore, out RaycastHit hit)
+    {
+        EnsureWorld();
+        hit = default;
+        var from = ToBullet(origin);
+        var to = ToBullet(origin + direction.normalized * MathF.Max(0f, maxDistance));
+        using var callback = new IgnoreColliderRayCallback(ref from, ref to, ignore);
+        _world!.RayTestRef(ref from, ref to, callback);
+        if (!callback.HasHit) return false;
+
+        var point = FromBullet(callback.HitPointWorld);
+        hit = new RaycastHit
+        {
+            point = point,
+            normal = FromBullet(callback.HitNormalWorld),
+            distance = Vector3.Distance(origin, point),
+            collider = callback.CollisionObject?.UserObject as Collider
+        };
+        return true;
+    }
+
+    private sealed class IgnoreColliderRayCallback : ClosestRayResultCallback
+    {
+        private readonly Collider? _ignore;
+        public IgnoreColliderRayCallback(ref BV3 from, ref BV3 to, Collider? ignore) : base(ref from, ref to) => _ignore = ignore;
+
+        public override bool NeedsCollision(BroadphaseProxy proxy0)
+        {
+            if (_ignore is not null && proxy0.ClientObject is CollisionObject other &&
+                ReferenceEquals(other.UserObject, _ignore))
+                return false;
+            return base.NeedsCollision(proxy0);
+        }
+    }
+
+    /// <summary>
+    /// Sweeps a capsule along <paramref name="motion"/> and reports the first blocking hit.
+    /// This is what lets a character stop at a wall instead of walking through it: the shape
+    /// is tested against the whole world for the exact travel of one step. Callers deal with
+    /// walkable surfaces by sliding along them rather than by filtering hits out here: a hit
+    /// normal cannot tell a flat floor from the edge of a step, so filtering would either let
+    /// the character walk through steps or refuse to climb slopes.
+    /// </summary>
+    internal static bool SweepCapsule(Vector3 position, float radius, float height, Vector3 motion,
+        Collider? ignore, out RaycastHit hit)
+    {
+        EnsureWorld();
+        hit = default;
+        float travel = motion.magnitude;
+        if (travel < 1e-6f) return false;
+
+        // Bullet's capsule is centred on its origin, so the shape centre is half the height up.
+        var shape = new CapsuleShape(MathF.Max(0.01f, radius), MathF.Max(0f, height - 2f * radius));
+        try
+        {
+            var from = ComposeTransform(position, Vector3.zero);
+            var to = ComposeTransform(position + motion, Vector3.zero);
+            var fromPoint = ToBullet(position);
+            var toPoint = ToBullet(position + motion);
+            using var callback = new CharacterSweepCallback(ref fromPoint, ref toPoint, ignore);
+            _world!.ConvexSweepTestRef(shape, ref from, ref to, callback, 0f);
+            if (!callback.HasHit) return false;
+
+            // ClosestHitFraction is how far along the motion the contact happened; the raw
+            // distance to the contact point would include the capsule's radius and give a wrong step.
+            hit = new RaycastHit
+            {
+                point = FromBullet(callback.HitPointWorld),
+                normal = FromBullet(callback.HitNormalWorld),
+                distance = callback.ClosestHitFraction * travel,
+                collider = callback.HitCollisionObject?.UserObject as Collider
+            };
+            return true;
+        }
+        finally { shape.Dispose(); }
+    }
+
+    /// <summary>Ignores the character's own collider, which would otherwise always block the sweep.</summary>
+    private sealed class CharacterSweepCallback : ClosestConvexResultCallback
+    {
+        private readonly Collider? _ignore;
+
+        public CharacterSweepCallback(ref BV3 from, ref BV3 to, Collider? ignore)
+            : base(ref from, ref to) => _ignore = ignore;
+
+        public override bool NeedsCollision(BroadphaseProxy proxy0)
+        {
+            if (proxy0.ClientObject is CollisionObject other && _ignore is not null &&
+                ReferenceEquals(other.UserObject, _ignore))
+                return false;
+            return base.NeedsCollision(proxy0);
+        }
+    }
+
     public static Collider[] OverlapSphere(Vector3 center, float radius)
     {
         var results = new List<Collider>();
